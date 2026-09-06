@@ -4,6 +4,13 @@ import argparse
 import json
 
 from projects.sem_paper.api import PROJECT_MANIFEST
+from projects.sem_paper.benchmarks import (
+    benchmark_definition,
+    build_benchmark_streams,
+    compare_methods,
+    external_benchmark_catalog,
+    prepare_external_benchmark,
+)
 from projects.sem_paper.composition import run_confirmatory_smoke
 from projects.sem_paper.composition.runner import run_real_matrix, run_real_pilot
 from projects.sem_paper.experiments import (
@@ -16,7 +23,11 @@ from projects.sem_paper.experiments import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sem")
-    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "real-pilot", "real"))
+    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "evobench", "benchmark-catalog", "external-prepare", "real-pilot", "real"))
+    parser.add_argument("--track", action="append", dest="tracks")
+    parser.add_argument("--streams-per-track", type=int, default=2)
+    parser.add_argument("--benchmark-id")
+    parser.add_argument("--task-export")
     args = parser.parse_args(argv)
     if args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()
@@ -42,6 +53,43 @@ def main(argv: list[str] | None = None) -> int:
                 {"variant_id": item.variant_id, "repetition": item.repetition, "seed": item.seed}
                 for item in plan.assignments
             ],
+        }
+    elif args.command == "benchmark-catalog":
+        payload = {
+            "benchmarks": [
+                {
+                    "benchmark_id": item.benchmark_id,
+                    "revision_id": item.revision_id,
+                    "venue": item.venue,
+                    "source_url": item.source_url,
+                    "scope": item.scope,
+                    "role": item.role,
+                    "runtime_status": item.runtime_status,
+                }
+                for item in external_benchmark_catalog()
+            ],
+            "claim_status": "catalog_only",
+        }
+    elif args.command == "external-prepare":
+        if not args.benchmark_id or not args.task_export:
+            parser.error("external-prepare requires --benchmark-id and --task-export")
+        payload = prepare_external_benchmark(
+            args.benchmark_id, args.task_export
+        ).as_dict()
+    elif args.command == "evobench":
+        definition = benchmark_definition()
+        streams = build_benchmark_streams(
+            tracks=tuple(args.tracks or definition.tracks),
+            streams_per_track=args.streams_per_track,
+        )
+        scores = compare_methods(streams)
+        payload = {
+            "benchmark_id": definition.benchmark_id,
+            "revision_id": definition.revision_id,
+            "benchmark_digest": definition.digest,
+            "streams": len(streams),
+            "scores": [score.as_dict() for score in scores],
+            "claim_status": "reference_fixture_only",
         }
     elif args.command == "real":
         report = run_real_matrix()

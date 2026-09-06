@@ -89,12 +89,20 @@ class RuleBasedEvolver:
             replacement,
             canonical_digest({"signal": matched, "replacement": replacement}),
         )
+        candidate_id = (
+            f"candidate-{matched}-"
+            f"{canonical_digest({'failure': matched, 'recent': recent_text})[:10]}"
+        )
         return EvolutionCandidate(
-            f"candidate-{matched}",
+            candidate_id,
             (edit,),
             "PROPOSED",
             edit.rationale,
-            canonical_digest({"status": "PROPOSED", "edits": (edit.digest,)}),
+            canonical_digest({
+                "candidate_id": candidate_id,
+                "status": "PROPOSED",
+                "edits": (edit.digest,),
+            }),
         )
 
 
@@ -126,6 +134,12 @@ class SEMMethodSession:
         self._completed: set[str] = set()
         self._entries: list[MemoryEntry] = []
         self._evolver = RuleBasedEvolver()
+        self._policy_overrides: dict[str, str] = {}
+        self._pending_candidates: dict[str, EvolutionCandidate] = {}
+        self._evolution_events: list[dict[str, Any]] = []
+        self._candidate_count = 0
+        self._adopted_count = 0
+        self._rejected_count = 0
         for index, text in enumerate(initial_memory):
             self._append(text, "initial", f"g{self._generation}", index)
 
@@ -159,8 +173,22 @@ class SEMMethodSession:
         self._entries.append(entry)
         return entry
 
-    def ingest(self, evidence: Any, context: object) -> None:
+    def ingest(
+        self,
+        evidence: Any,
+        context: object,
+        *,
+        persistent: bool = True,
+    ) -> None:
         self._ensure_open()
+        if not persistent and self.treatment_id == "fixed_memory":
+            return
+        if self.treatment_id == "fixed_memory" and persistent:
+            self._evolution_events.append({
+                "event": "memory_update_rejected",
+                "reason": "fixed_memory_is_immutable",
+            })
+            return
         if isinstance(evidence, Mapping):
             text = json.dumps(evidence, sort_keys=True, ensure_ascii=False)
         else:
@@ -212,12 +240,25 @@ class SEMMethodSession:
                 ("craft_item", {"item": "shield", "count": 1}, 120.0),
             ),
         }
-        return tuple(plans.get(family, ()))
+        plan = tuple(plans.get(family, ()))
+        policy_hint = self._policy_overrides.get(family)
+        if policy_hint:
+            plan = tuple(
+                (action_type, {**dict(arguments), "_sem_policy_hint": policy_hint}, budget)
+                for action_type, arguments, budget in plan
+            )
+        return plan
 
     def task_completion_key(self, context: object) -> str:
         return canonical_digest({"session": self.session_id, "context": str(context)})
 
-    def task_completed(self, result: object, context: object) -> MethodTaskCompletionReceipt:
+    def task_completed(
+        self,
+        result: object,
+        context: object,
+        *,
+        evolution_feedback: Mapping[str, Any] | None = None,
+    ) -> MethodTaskCompletionReceipt:
         self._ensure_open()
         if isinstance(result, MethodTaskOutcome):
             outcome = result
@@ -239,13 +280,71 @@ class SEMMethodSession:
             return MethodTaskCompletionReceipt(key, self.generation)
         self._completed.add(key)
         self.ingest(dict(outcome), context)
-        if self.adaptive and not outcome.success:
+        if self.adaptive and not outcome.success and not self._pending_candidates:
             candidate = self._evolver.propose(outcome.failure_reason, outcome.task_id)
             if candidate.edits:
-                self._generation += 1
-                for edit in candidate.edits:
-                    self._append(edit.replacement, f"candidate:{candidate.candidate_id}", self.generation)
+                self._candidate_count += 1
+                self._pending_candidates[candidate.candidate_id] = candidate
+                self._evolution_events.append({
+                    "event": "candidate_proposed",
+                    "candidate_id": candidate.candidate_id,
+                    "task_id": outcome.task_id,
+                    "family": outcome.family,
+                    "treatment": self.treatment_id,
+                })
+                if self.treatment_id == "rule_based":
+                    self._adopt_candidate(candidate, outcome.family, "rule_policy")
+                elif evolution_feedback is not None:
+                    self.validate_and_apply(
+                        candidate.candidate_id,
+                        outcome.family,
+                        evolution_feedback,
+                    )
         return MethodTaskCompletionReceipt(key, self.generation)
+
+    def _adopt_candidate(self, candidate: EvolutionCandidate, family: str, reason: str) -> None:
+        self._generation += 1
+        self._adopted_count += 1
+        self._policy_overrides[family] = candidate.candidate_id
+        for edit in candidate.edits:
+            self._append(edit.replacement, f"candidate:{candidate.candidate_id}", self.generation)
+        self._evolution_events.append({
+            "event": "candidate_adopted",
+            "candidate_id": candidate.candidate_id,
+            "family": family,
+            "reason": reason,
+            "generation": self.generation,
+        })
+        self._pending_candidates.pop(candidate.candidate_id, None)
+
+    def validate_and_apply(
+        self,
+        candidate_id: str,
+        family: str,
+        feedback: Mapping[str, Any],
+    ) -> bool:
+        self._ensure_open()
+        candidate = self._pending_candidates.get(candidate_id)
+        if candidate is None:
+            raise KeyError(f"unknown SEM evolution candidate: {candidate_id}")
+        verified = bool(feedback.get("verified", False))
+        utility_delta = float(feedback.get("utility_delta", 0.0))
+        if verified and utility_delta > 0.0:
+            self._adopt_candidate(candidate, family, "shadow_validation")
+            return True
+        self._rejected_count += 1
+        self._pending_candidates.pop(candidate_id, None)
+        self._evolution_events.append({
+            "event": "candidate_rejected",
+            "candidate_id": candidate_id,
+            "family": family,
+            "verified": verified,
+            "utility_delta": utility_delta,
+        })
+        return False
+
+    def pending_candidates(self) -> tuple[EvolutionCandidate, ...]:
+        return tuple(self._pending_candidates.values())
 
     def checkpoint(self) -> MethodSnapshot:
         self._ensure_open()
@@ -257,6 +356,25 @@ class SEMMethodSession:
             "generation": self._generation,
             "queries": self._queries,
             "completed": sorted(self._completed),
+            "policy_overrides": dict(sorted(self._policy_overrides.items())),
+            "pending_candidates": {
+                key: {
+                    "candidate_id": value.candidate_id,
+                    "status": value.status,
+                    "reason": value.reason,
+                    "digest": value.digest,
+                    "edits": [
+                        {"edit_id": edit.edit_id, "rationale": edit.rationale,
+                         "replacement": edit.replacement, "digest": edit.digest}
+                        for edit in value.edits
+                    ],
+                }
+                for key, value in sorted(self._pending_candidates.items())
+            },
+            "evolution_events": list(self._evolution_events),
+            "candidate_count": self._candidate_count,
+            "adopted_count": self._adopted_count,
+            "rejected_count": self._rejected_count,
             "entries": [entry.__dict__ if hasattr(entry, "__dict__") else {
                 "entry_id": entry.entry_id, "text": entry.text,
                 "source": entry.source, "generation": entry.generation, "digest": entry.digest
@@ -281,6 +399,19 @@ class SEMMethodSession:
         self._generation = int(data["generation"])
         self._queries = int(data["queries"])
         self._completed = set(data["completed"])
+        self._policy_overrides = dict(data.get("policy_overrides", {}))
+        self._pending_candidates = {
+            key: EvolutionCandidate(
+                candidate_id=value["candidate_id"],
+                edits=tuple(EvolutionEdit(**edit) for edit in value.get("edits", [])),
+                status=value["status"], reason=value["reason"], digest=value["digest"],
+            )
+            for key, value in data.get("pending_candidates", {}).items()
+        }
+        self._evolution_events = list(data.get("evolution_events", []))
+        self._candidate_count = int(data.get("candidate_count", 0))
+        self._adopted_count = int(data.get("adopted_count", 0))
+        self._rejected_count = int(data.get("rejected_count", 0))
         self._entries = [MemoryEntry(**row) for row in data["entries"]]
 
     def diagnostics(self) -> Mapping[str, Any]:
@@ -291,6 +422,12 @@ class SEMMethodSession:
             "entry_count": len(self._entries),
             "memory_queries": self._queries,
             "completed_task_count": len(self._completed),
+            "pending_candidate_count": len(self._pending_candidates),
+            "candidate_count": self._candidate_count,
+            "adopted_count": self._adopted_count,
+            "rejected_count": self._rejected_count,
+            "evolution_events": len(self._evolution_events),
+            "policy_overrides": dict(self._policy_overrides),
             "adaptive": self.adaptive,
             "closed": self._closed,
         }

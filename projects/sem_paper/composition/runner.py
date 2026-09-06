@@ -57,7 +57,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         binding: VariantBinding,
     ) -> StudyMetricObservation:
         implementation = binding.variant.implementation_id.rsplit(".", 1)[-1]
-        treatment = "self_evolving" if implementation in {"rule_based", "self_evolving"} else "fixed_memory"
+        treatment = implementation
         session = SEMMethodSession(
             session_id=f"{assignment.variant_id}:{assignment.repetition}",
             treatment_id=treatment,

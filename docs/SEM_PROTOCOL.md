@@ -3,39 +3,51 @@
 ## Ownership
 
 Noetrium is the upstream platform. It owns stable lifecycle, identity,
-environment, participant, study, run-control, and evidence contracts.
+environment/provider, participant, study, run-control, assignment isolation,
+action/effect, and evidence contracts.
 
-SEM owns the memory algorithm, Fixed/Rule/Self treatment semantics, Minecraft
-task workload, metrics, and scientific claim rules. The downstream package
-imports Noetrium only through noetrium.contracts and the documented study
-runtime surface.
+SEM owns the memory algorithm, Fixed/Rule/Self treatment semantics, benchmark
+task-stream semantics, metrics, analysis, and scientific claim rules. The
+downstream package imports Noetrium only through noetrium.contracts and the
+documented study runtime surface.
 
-## Frozen confirmatory design
+## Current primary protocol
 
-The Core-6 matrix is:
+The current SEM-owned protocol is SEM-EvoBench v1. It has four tracks:
+memory_core, experience_transfer, agentic_closed_loop, and environment_drift.
+Each track is a six-episode ordered stream with matched fixed_memory,
+rule_based, and self_evolving treatments.
 
-| family | Seed-C | Seed-X |
-|---|---:|---:|
-| Fixed memory | control | control |
-| Rule-based evolution | treatment | treatment |
-| Self-evolving memory | treatment | treatment |
+The executable definition, stream digests, paired-control scoring, candidate
+validation, and raw traces live in projects/sem_paper/benchmarks/evo_protocol.py.
+Use:
 
-There are 12 repetitions, six manifest tasks per assignment, and seven typed
-metrics. The compiled ExperimentPlan is the only execution authority.
+    python -m projects.sem_paper.cli evobench --streams-per-track 2
 
-## Environment boundary
+## Treatment and evidence rules
 
-The local scripted Minecraft provider implements the Noetrium
-EnvironmentProviderPort and EnvironmentSession lifecycle. It is a
-deterministic conformance fixture. Real Mineflayer/RCON execution can replace
-the fixture at the compiled plan boundary.
+fixed_memory is immutable. rule_based adopts a bounded candidate immediately.
+self_evolving requires later verified positive utility before adoption. The
+candidate lifecycle is explicit: proposed, validated, adopted/rejected,
+generation, and policy override.
+
+The local scripted Minecraft provider implements the Noetrium environment
+lifecycle and is a deterministic conformance fixture. It cannot confer a
+scientific claim. Real Mineflayer execution can replace the fixture at the
+compiled plan boundary only after assignment reset, effect receipts, recovery,
+and evidence closure are verified.
+
+## Legacy status
+
+The old Minecraft Core-6 matrix remains available for compatibility through
+the legacy protocol CLI, but it is archived and not claim-bearing. The audit
+found treatment/identity and causal-closure defects in its earlier evidence.
+Its results must not be pooled with SEM-EvoBench.
 
 Benchmark, replay, synthetic, tool, and multi-agent are not environment
-categories and are not implemented as environments here.
+categories. External benchmark adapters import metadata only and keep
+execution at the SEM method -> Noetrium environment -> effect/evidence
+boundary.
 
-## Evidence status
-
-sem smoke produces protocol-bound smoke evidence. It is deliberately not
-claim-ready evidence: a scientific claim requires a qualified real provider,
-frozen deployment/model bindings, and published evidence through Noetrium's
-run/evidence contracts.
+See SEM_EVO_BENCHMARK.md and BENCHMARK_INTEGRATION_20260906.md for the
+frozen benchmark and external comparison roles.

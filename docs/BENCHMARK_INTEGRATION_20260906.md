@@ -2,27 +2,43 @@
 
 ## 结论
 
-第一阶段接入 MineDojo 的 programmatic task metadata，并保留 Noetrium Minecraft provider 作为唯一执行与 effect-evidence 权威；同时接入 MemoryAgentBench 作为 SEM memory-only track。benchmark 不放进 `environment` ownership。
+SEM 的第一方主 benchmark 是 SEM-EvoBench v1，而不是把外部 benchmark
+搬进 Noetrium 的 environment。它负责验证 memory -> action -> outcome ->
+validation -> evolution 的完整闭环。
 
-## 选择依据
+外部对照分层接入：
 
-- MineDojo 当前仓库列出 3142 个任务，分为 Programmatic、Creative、Playthrough；programmatic 任务可由模拟器状态自动验收，适合映射到 SEM 的 task/effect/evidence 协议。
-- MemoryAgentBench 面向 incremental multi-turn memory，覆盖 retrieval、test-time learning、long-range understanding、selective forgetting，适合直接检验 SEM 的记忆层。
-- EMemBench 生成基于 agent trajectory 的问题并提供程序化 ground truth，适合作为第二阶段 episodic-memory track；当前先不把 Jericho/Crafter runtime 混入 Minecraft environment。
-- AgentBench 是跨八类环境的总 benchmark，适合作为外部对照，不作为 SEM environment 的所有权来源。
+| benchmark | 用途 | SEM 归属 | 当前状态 |
+|---|---|---|---|
+| MemoryArena | 多 session、action/feedback agent loop | external comparison | metadata only |
+| MemoryAgentBench | incremental multi-turn memory 能力 | memory-only comparison | metadata only |
+| LongMemEval | 长期会话回归与 temporal/update/abstention | regression | metadata only |
+| BEAM | 超长上下文容量压力 | stress test | metadata only |
+| MineDojo | Minecraft programmatic task source | optional task source | metadata only |
 
-## 接口
+外部 benchmark 不改变 Noetrium 的 environment ownership。MineDojo 不是
+memory benchmark；它只能提供冻结后的任务及 success spec。
 
-`JsonTaskBenchmarkAdapter` 只导入冻结的 task metadata，输出 Noetrium `BenchmarkTaskSet`。它不执行 action、不写 memory、不接受 provider 的隐式成功；执行仍走 SEM method → Noetrium environment port → effect receipt → scientific evidence。
+## 接口和冻结规则
 
-外部任务导出为：
+JsonTaskBenchmarkAdapter 只导入本地冻结的 task metadata，输出 Noetrium
+BenchmarkTaskSet。prepare_external_benchmark 会保留 benchmark id、revision、
+source digest、task content digest 和 execution owner。它不执行 action、
+不写 memory，也不接受 provider 的隐式成功。
 
-```json
-{"tasks":[{"task_id":"...","goal":"...","family":"programmatic","success_spec":{}}]}
-```
+外部来源：
 
-导入前固定 source digest；运行记录必须带 benchmark id、revision、source digest、task content digest。
+- MemoryArena: https://arxiv.org/abs/2602.16313
+- MemoryAgentBench: https://openreview.net/forum?id=DT7JyQC3MR
+- LongMemEval: https://arxiv.org/abs/2410.10813
+- BEAM: https://openreview.net/forum?id=y59hf5lrMn
+- MineDojo: https://github.com/MineDojo/MineDojo
 
-## 暂缓
+## 暂缓事项
 
-MineDojo 的完整 simulator runtime 不直接装入当前镜像：它与现有 Mineflayer/Noetrium provider 的 runtime/世界生命周期不同。先接 metadata + programmatic success specs，再做 provider-level execution adapter；在 assignment world cut、effect receipt 和 evidence closure 全部通过前，不跑 external full-N。
+当前镜像没有把外部 simulator/runtime 当作环境依赖安装。只有在数据版本、
+运行时、任务 success spec、provider mapping、assignment reset、effect
+receipt 和 evidence closure 全部冻结后，才允许外部 full-N 执行。
+
+当前 CLI 的 benchmark-catalog 和 external-prepare 是可审计的元数据入口；
+输出状态仍是 metadata_only / metadata_prepared，不是实验结论。

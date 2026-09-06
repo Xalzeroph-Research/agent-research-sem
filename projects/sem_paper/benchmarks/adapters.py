@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -75,3 +76,92 @@ class JsonTaskBenchmarkAdapter:
             task_schema_id="sem.external-benchmark.task.v1",
             tasks=tasks,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalBenchmarkSpec:
+    benchmark_id: str
+    revision_id: str
+    venue: str
+    source_url: str
+    scope: str
+    role: str
+    runtime_status: str = "metadata_only"
+
+
+EXTERNAL_BENCHMARKS = (
+    ExternalBenchmarkSpec(
+        "memory-agent-bench", "iclr-2026", "ICLR 2026",
+        "https://openreview.net/forum?id=DT7JyQC3MR",
+        "incremental multi-turn memory", "memory_core",
+    ),
+    ExternalBenchmarkSpec(
+        "memory-arena", "icml-2026", "ICML 2026",
+        "https://arxiv.org/abs/2602.16313",
+        "multi-session agent-environment loop", "agentic_closed_loop",
+    ),
+    ExternalBenchmarkSpec(
+        "longmemeval", "iclr-2025", "ICLR 2025",
+        "https://arxiv.org/abs/2410.10813",
+        "long-term conversational memory", "regression_memory",
+    ),
+    ExternalBenchmarkSpec(
+        "beam", "iclr-2026", "ICLR 2026",
+        "https://openreview.net/forum?id=y59hf5lrMn",
+        "long-context memory stress", "capacity_stress",
+    ),
+)
+
+
+def external_benchmark_catalog() -> tuple[ExternalBenchmarkSpec, ...]:
+    return EXTERNAL_BENCHMARKS
+
+@dataclass(frozen=True, slots=True)
+class ExternalBenchmarkPreparation:
+    benchmark: ExternalBenchmarkSpec
+    task_set: BenchmarkTaskSet
+    execution_owner: str = "sem+noetrium"
+    claim_status: str = "metadata_prepared"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "benchmark_id": self.benchmark.benchmark_id,
+            "revision_id": self.benchmark.revision_id,
+            "source_url": self.benchmark.source_url,
+            "source_digest": self.task_set.source_digest,
+            "task_count": len(self.task_set.tasks),
+            "execution_owner": self.execution_owner,
+            "claim_status": self.claim_status,
+        }
+
+
+def external_benchmark_spec(benchmark_id: str) -> ExternalBenchmarkSpec:
+    for spec in EXTERNAL_BENCHMARKS:
+        if spec.benchmark_id == benchmark_id:
+            return spec
+    raise BenchmarkAdapterError(f"unknown external benchmark: {benchmark_id}")
+
+
+def prepare_external_benchmark(
+    benchmark_id: str,
+    path: str | Path,
+) -> ExternalBenchmarkPreparation:
+    spec = external_benchmark_spec(benchmark_id)
+    task_set = JsonTaskBenchmarkAdapter(
+        spec.benchmark_id, spec.revision_id
+    ).build(path)
+    return ExternalBenchmarkPreparation(spec, task_set)
+
+__all__ = [
+    "BenchmarkAdapterError",
+    "JsonTaskBenchmarkAdapter",
+    "ExternalBenchmarkSpec",
+    "ExternalBenchmarkPreparation",
+    "EXTERNAL_BENCHMARKS",
+    "external_benchmark_catalog",
+    "external_benchmark_spec",
+    "prepare_external_benchmark",
+    "load_benchmark_tasks",
+    "minedojo_adapter",
+    "memory_agent_bench_adapter",
+]
