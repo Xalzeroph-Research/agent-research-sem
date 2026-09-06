@@ -1,1 +1,0 @@
-"""Hierarchical scope system namespace."""

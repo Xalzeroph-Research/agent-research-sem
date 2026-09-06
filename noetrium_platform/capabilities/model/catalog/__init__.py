@@ -1,1 +1,0 @@
-"""model.catalog subsystem boundary."""

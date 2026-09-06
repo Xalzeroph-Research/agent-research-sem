@@ -1,1 +1,0 @@
-"""participant.binding api boundary."""

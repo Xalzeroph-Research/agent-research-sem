@@ -1,1 +1,0 @@
-"""Participant System target boundary."""

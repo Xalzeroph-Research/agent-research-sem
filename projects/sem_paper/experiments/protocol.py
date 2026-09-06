@@ -14,9 +14,7 @@ from noetrium.contracts import (
     VariantKind,
     canonical_digest,
 )
-from noetrium_platform.research.experimentation.study.runtime import (
-    DeterministicStudyAssignment,
-)
+from noetrium.contracts import DeterministicStudyAssignment
 
 CORE6_VARIANTS = (
     ("fixed-c", VariantKind.CONTROL, "fixed_memory", "Seed-C"),

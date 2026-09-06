@@ -1,1 +1,0 @@
-"""model.deployment subsystem boundary."""

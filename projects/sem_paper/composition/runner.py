@@ -8,10 +8,11 @@ from noetrium.contracts import (
     ExperimentPlan,
     StudyExecutionUnit,
     StudyMatrixExecutionReport,
+    StudyMatrixExecutor,
     StudyMetricObservation,
     VariantBinding,
 )
-from noetrium_platform.research.experimentation.study.runtime import StudyMatrixExecutor
+# StudyMatrixExecutor is a stable Noetrium contract export.
 
 from projects.sem_paper.composition.environment import ScriptedMinecraftEnvironment
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession

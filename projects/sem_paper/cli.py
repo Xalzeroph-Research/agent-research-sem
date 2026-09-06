@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import argparse
+import json
+
+from projects.sem_paper.api import PROJECT_MANIFEST
+from projects.sem_paper.composition import run_confirmatory_smoke
+from projects.sem_paper.experiments import (
+    build_benchmark,
+    build_sem_paper_confirmatory_protocol,
+    compile_sem_paper_experiment_plan,
+    is_confirmatory_protocol,
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sem")
+    parser.add_argument("command", choices=("doctor", "protocol", "smoke"))
+    args = parser.parse_args(argv)
+    if args.command == "doctor":
+        protocol = build_sem_paper_confirmatory_protocol()
+        plan = compile_sem_paper_experiment_plan(protocol)
+        payload = {
+            "project": PROJECT_MANIFEST.identity.key,
+            "manifest_digest": PROJECT_MANIFEST.semantic_digest,
+            "protocol_digest": protocol.protocol_digest,
+            "plan_digest": plan.plan_digest,
+            "assignments": len(plan.assignments),
+            "tasks": len(build_benchmark().tasks),
+            "confirmatory": is_confirmatory_protocol(protocol),
+            "claim_status": "smoke_only",
+        }
+    elif args.command == "protocol":
+        protocol = build_sem_paper_confirmatory_protocol()
+        plan = compile_sem_paper_experiment_plan(protocol)
+        payload = {
+            "protocol": protocol,
+            "protocol_digest": protocol.protocol_digest,
+            "plan_digest": plan.plan_digest,
+            "assignments": [
+                {"variant_id": item.variant_id, "repetition": item.repetition, "seed": item.seed}
+                for item in plan.assignments
+            ],
+        }
+    else:
+        report = run_confirmatory_smoke()
+        payload = {
+            "protocol_digest": report.protocol_digest,
+            "observations": len(report.observations),
+            "aggregates": [
+                {"variant_id": row.variant_id, "metric": row.metric_name,
+                 "count": row.count, "mean": row.mean}
+                for row in report.aggregates
+            ],
+            "claim_status": "smoke_only",
+        }
+    print(json.dumps(payload, default=str, sort_keys=True, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

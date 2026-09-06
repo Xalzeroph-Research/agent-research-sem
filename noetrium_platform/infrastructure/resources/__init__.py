@@ -1,1 +1,0 @@
-"""Resource System target boundary."""

@@ -1,1 +1,0 @@
-"""resource system api boundary."""

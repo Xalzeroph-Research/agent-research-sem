@@ -1,5 +1,0 @@
-SYSTEM = "runtime"
-NODE = "runtime/toolchain"
-OWNS = "verified host toolchain acquisition, materialization, identity and receipts"
-MUST_NOT_OWN = "environment scenarios, experiment protocols, or project policy"
-AUTHORITY = "runtime_toolchain"
