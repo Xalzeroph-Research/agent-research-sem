@@ -14,7 +14,10 @@ from noetrium.contracts import (
 )
 # StudyMatrixExecutor is a stable Noetrium contract export.
 
-from projects.sem_paper.composition.environment import ScriptedMinecraftEnvironment
+from projects.sem_paper.composition.environment import (
+    RealMinecraftEnvironment,
+    ScriptedMinecraftEnvironment,
+)
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
 
 
@@ -23,11 +26,12 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
     """SEM-owned adapter at Noetrium's compiled-plan boundary."""
 
     plan: ExperimentPlan
-    environment: ScriptedMinecraftEnvironment
+    environment: object
 
-    def run(self) -> StudyMatrixExecutionReport:
+    def run(self, assignments=None) -> StudyMatrixExecutionReport:
         executor = StudyMatrixExecutor(BasicStudyMetricAggregator())
-        return executor.execute_plan(self.plan, self.plan.assignments, self)
+        selected = self.plan.assignments if assignments is None else tuple(assignments)
+        return executor.execute_plan(self.plan, selected, self)
 
     def execute_bound(
         self,
@@ -85,4 +89,12 @@ def run_confirmatory_smoke() -> StudyMatrixExecutionReport:
     return SEMExperimentRunner(plan, ScriptedMinecraftEnvironment()).run()
 
 
-__all__ = ["SEMExperimentRunner", "run_confirmatory_smoke"]
+def run_real_pilot() -> StudyMatrixExecutionReport:
+    from projects.sem_paper.experiments.protocol import compile_sem_paper_experiment_plan
+
+    plan = compile_sem_paper_experiment_plan()
+    runner = SEMExperimentRunner(plan, RealMinecraftEnvironment())
+    return runner.run(assignments=plan.assignments[:1])
+
+
+__all__ = ["SEMExperimentRunner", "run_confirmatory_smoke", "run_real_pilot"]
