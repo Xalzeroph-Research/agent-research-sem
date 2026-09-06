@@ -1,3 +1,13 @@
-from .definition import PROJECT_DEFINITION
+from .definition import (
+    PROJECT_ID,
+    PROJECT_MANIFEST,
+    PROJECT_VERSION,
+    SEM_METHOD_IDENTITIES,
+)
 
-__all__ = ["PROJECT_DEFINITION"]
+__all__ = [
+    "PROJECT_ID",
+    "PROJECT_VERSION",
+    "PROJECT_MANIFEST",
+    "SEM_METHOD_IDENTITIES",
+]
