@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from noetrium.contracts import (
     ProjectCapabilityRequirement,
     ProjectIdentity,
@@ -13,46 +11,64 @@ from noetrium.contracts import (
 )
 
 PROJECT_ID = "sem-paper"
-PROJECT_VERSION = "2.0.0"
+PROJECT_VERSION = "3.0.0"
 
 SEM_METHOD_IDENTITIES = {
-    "fixed_memory": MethodProjectDefinition(
+    treatment: MethodProjectDefinition(
         role="memory",
-        identity=MethodIdentity("self_evolving_memory", "2.0.0", "1", "1"),
-        configuration_digest=canonical_digest({"treatment": "fixed_memory"}),
-    ),
-    "self_evolving": MethodProjectDefinition(
-        role="memory",
-        identity=MethodIdentity("self_evolving_memory", "2.0.0", "1", "1"),
-        configuration_digest=canonical_digest({"treatment": "self_evolving"}),
-    ),
+        identity=MethodIdentity("self_evolving_memory", "3.0.0", "1", "1"),
+        configuration_digest=canonical_digest(
+            {
+                "treatment": treatment,
+                "architecture": "semantic-memory-graph.v1",
+                "activation": "atomic-versioned",
+            }
+        ),
+    )
+    for treatment in ("no_memory", "flat_episodic", "fixed_typed", "sem")
 }
+
 
 def _interface(name: str) -> str:
     return canonical_digest({"contract": name, "version": "1"})
+
 
 PROJECT_MANIFEST = ProjectManifest(
     project=ProjectSpec(
         identity=ProjectIdentity(PROJECT_ID, PROJECT_VERSION),
         program_id="agent-research",
         name="Self-Evolving Memory",
-        description="A method study of memory evolution under bounded agent tasks.",
-        tags=("agent", "memory", "sem"),
+        description=(
+            "Semantic memory architectures that evolve from structural demand "
+            "and verified historical evidence."
+        ),
+        tags=("agent", "memory", "semantic-evolution"),
     ),
     template_revision="noetrium-downstream-v1",
     provenance=ProjectToolProvenance(
-        "noetrium", "0.44.0", canonical_digest({"platform": "noetrium", "version": "0.44.0"})
+        "noetrium",
+        "0.44.0",
+        canonical_digest({"platform": "noetrium", "version": "0.44.0"}),
     ),
     capability_requirements=(
-        ProjectCapabilityRequirement("method-runtime", "participant", "method", 1, _interface("participant.method")),
-        ProjectCapabilityRequirement("environment-runtime", "environment", "session", 1, _interface("environment.session")),
-        ProjectCapabilityRequirement("study-runtime", "research", "study", 1, _interface("research.study")),
+        ProjectCapabilityRequirement(
+            "method-runtime", "participant", "method", 1,
+            _interface("participant.method"),
+        ),
+        ProjectCapabilityRequirement(
+            "environment-runtime", "environment", "session", 1,
+            _interface("environment.session"),
+        ),
+        ProjectCapabilityRequirement(
+            "study-runtime", "research", "study", 1,
+            _interface("research.study"),
+        ),
     ),
-    method_requirements=(
-        ProjectMethodRequirement("self_evolving_memory", "fixed_memory"),
-        ProjectMethodRequirement("self_evolving_memory", "self_evolving"),
+    method_requirements=tuple(
+        ProjectMethodRequirement("self_evolving_memory", treatment)
+        for treatment in ("no_memory", "flat_episodic", "fixed_typed", "sem")
     ),
-    study_ids=("sem-core6", "sem-conformance"),
+    study_ids=("sem-method-conformance",),
 )
 
 __all__ = ["PROJECT_ID", "PROJECT_VERSION", "PROJECT_MANIFEST", "SEM_METHOD_IDENTITIES"]
