@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from uuid import uuid4
 from typing import Any, Mapping
 
 from noetrium.contracts import (
@@ -314,6 +315,15 @@ class RealMinecraftEnvironment:
 
     environment_id = "minecraft.mineflayer.jsonl.v1"
 
+    def __init__(self, execution_run_id: str | None = None) -> None:
+        self.execution_run_id = (
+            execution_run_id
+            or os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
+            or uuid4().hex
+        )
+        if not self.execution_run_id:
+            raise ValueError("SEM execution run identity is required")
+
     @property
     def identity(self) -> EnvironmentIdentity:
         return EnvironmentIdentity(
@@ -343,7 +353,9 @@ class RealMinecraftEnvironment:
         seed: str,
     ) -> tuple[EnvironmentTaskResult, ...]:
         self._reset_assignment_world(session.session_id)
-        run_identity = session.session_id.replace(":", "-")
+        run_identity = (
+            f"{self.execution_run_id}-{session.session_id.replace(':', '-')}"
+        )
         recovery_root = os.environ.get(
             "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
         )
