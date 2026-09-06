@@ -1,14 +1,19 @@
 """SEM method implementations owned by the downstream research project."""
 from .self_evolving_memory import (
+    EvidenceEvent,
     EvolutionCandidate,
     EvolutionEdit,
     MemoryEntry,
-    RuleBasedEvolver,
     SEMMethodSession,
+    SEM_METHOD_ID,
+    SEM_TREATMENTS,
+    SemanticEdit,
+    StructuralDemand,
     SemMethodAgentMemoryAdapter,
 )
 
 __all__ = [
-    "EvolutionCandidate", "EvolutionEdit", "MemoryEntry",
-    "RuleBasedEvolver", "SEMMethodSession", "SemMethodAgentMemoryAdapter",
+    "EvidenceEvent", "EvolutionCandidate", "EvolutionEdit", "MemoryEntry",
+    "SEMMethodSession", "SEM_METHOD_ID", "SEM_TREATMENTS",
+    "SemanticEdit", "StructuralDemand", "SemMethodAgentMemoryAdapter",
 ]

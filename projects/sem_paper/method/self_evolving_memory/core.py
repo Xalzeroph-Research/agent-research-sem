@@ -482,13 +482,23 @@ class SEMMethodSession:
             return self._build_create(demand)
         left_id = f"{source_id}:a"
         right_id = f"{source_id}:b"
-        edits = [
-            SemanticEdit(
-                f"edit:retire:{source_id}", "retire_node", source_id, {},
-                "Retire the over-broad semantic node before splitting it.",
-                canonical_digest({"operation": "retire_node", "target": source_id}),
-            ),
-        ]
+        edits = []
+        for edge in self._graph.snapshot().edges:
+            if edge.active and (edge.source_id == source_id or edge.target_id == source_id):
+                edge_id = f"edge:{edge.source_id}:{edge.target_id}:{edge.relation}"
+                edits.append(SemanticEdit(
+                    f"edit:retire:{edge_id}", "retire_edge", edge_id, {
+                        "source_id": edge.source_id, "target_id": edge.target_id,
+                        "relation": edge.relation,
+                    },
+                    "Retire an edge attached to the split source.",
+                    canonical_digest({"operation": "retire_edge", "target": edge_id}),
+                ))
+        edits.append(SemanticEdit(
+            f"edit:retire:{source_id}", "retire_node", source_id, {},
+            "Retire the over-broad semantic node before splitting it.",
+            canonical_digest({"operation": "retire_node", "target": source_id}),
+        ))
         for new_id, suffix in ((left_id, "verified"), (right_id, "unresolved")):
             edits.append(SemanticEdit(
                 f"edit:create:{new_id}", "create", new_id,
@@ -527,28 +537,55 @@ class SEMMethodSession:
                 "Merge duplicate semantic nodes with compatible evidence.",
                 canonical_digest({"operation": "merge", "target": target_id}),
             ),
-        ]
-        edits.extend(
             SemanticEdit(
+                "edit:link:" + target_id, "create_edge", "edge:" + target_id,
+                {"source_id": "memory:outcome", "target_id": target_id, "relation": "explains"},
+                "Connect the merged semantic node to outcomes.",
+                canonical_digest({"operation": "create_edge", "target": target_id}),
+            ),
+        ]
+        for source_id in source_ids:
+            for edge in self._graph.snapshot().edges:
+                if edge.active and (edge.source_id == source_id or edge.target_id == source_id):
+                    edge_id = f"edge:{edge.source_id}:{edge.target_id}:{edge.relation}"
+                    edits.append(SemanticEdit(
+                        f"edit:retire:{edge_id}", "retire_edge", edge_id, {
+                            "source_id": edge.source_id, "target_id": edge.target_id,
+                            "relation": edge.relation,
+                        },
+                        "Retire an edge attached to a merged source.",
+                        canonical_digest({"operation": "retire_edge", "target": edge_id}),
+                    ))
+            edits.append(SemanticEdit(
                 f"edit:retire:{source_id}", "retire_node", source_id, {},
                 "Retire a redundant source after merge.",
                 canonical_digest({"operation": "retire_node", "target": source_id}),
-            )
-            for source_id in source_ids
-        )
+            ))
         return tuple(edits[:8])
 
     def _build_retire(self, demand: StructuralDemand) -> tuple[SemanticEdit, ...]:
+        edits: list[SemanticEdit] = []
         target_ids = demand.target_ids or self._semantic_node_ids(demand.family)
-        return tuple(
-            SemanticEdit(
+        for target_id in target_ids[:4]:
+            if self._graph.snapshot().node(target_id) is None:
+                continue
+            for edge in self._graph.snapshot().edges:
+                if edge.active and (edge.source_id == target_id or edge.target_id == target_id):
+                    edge_id = f"edge:{edge.source_id}:{edge.target_id}:{edge.relation}"
+                    edits.append(SemanticEdit(
+                        f"edit:retire:{edge_id}", "retire_edge", edge_id, {
+                            "source_id": edge.source_id, "target_id": edge.target_id,
+                            "relation": edge.relation,
+                        },
+                        "Retire an edge attached to an obsolete semantic node.",
+                        canonical_digest({"operation": "retire_edge", "target": edge_id}),
+                    ))
+            edits.append(SemanticEdit(
                 f"edit:retire:{target_id}", "retire_node", target_id, {},
                 "Retire an obsolete semantic node after new evidence.",
                 canonical_digest({"operation": "retire_node", "target": target_id}),
-            )
-            for target_id in target_ids[:4]
-            if self._graph.snapshot().node(target_id) is not None
-        )
+            ))
+        return tuple(edits[:8])
 
     def _propose(self, demand: StructuralDemand) -> EvolutionCandidate:
         builders = {
@@ -580,6 +617,8 @@ class SEMMethodSession:
             return MemoryGraphOperation("create_edge", edit.target_id, edit.payload)
         if edit.operation == "retire_node":
             return MemoryGraphOperation("retire_node", edit.target_id, {})
+        if edit.operation == "retire_edge":
+            return MemoryGraphOperation("retire_edge", edit.target_id, edit.payload)
         if edit.operation == "update_node":
             return MemoryGraphOperation("update_node", edit.target_id, edit.payload)
         raise ValueError(f"unsupported SEM edit operation: {edit.operation}")
