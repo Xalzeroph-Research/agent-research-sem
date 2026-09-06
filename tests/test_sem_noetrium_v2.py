@@ -103,3 +103,33 @@ def test_smoke_report_is_complete() -> None:
     assert len(build_benchmark().tasks) == 6
     assert len(report.observations) == 72
     assert report.plan_digest == plan.plan_digest
+
+def test_runner_delegates_assignment_lifecycle_to_generic_port() -> None:
+    plan = compile_sem_paper_experiment_plan()
+    events: list[str] = []
+
+    class Isolation:
+        def prepare_assignment(self, identity):
+            events.append(f"prepare:{identity.assignment_id}")
+            return object()
+
+        def finalize_assignment(self, identity, receipt):
+            events.append(f"finalize:{identity.assignment_id}")
+            return receipt
+
+    def factory(identity, assignment, binding):
+        assert identity.assignment_id == assignment.assignment_digest
+        assert binding.variant.variant_id == assignment.variant_id
+        return Isolation()
+
+    runner = SEMExperimentRunner(
+        plan,
+        ScriptedMinecraftEnvironment(),
+        assignment_isolation_factory=factory,
+    )
+    assignment = plan.assignments[0]
+    runner._execute_assignment(assignment, plan.binding_for(assignment.variant_id))
+    assert events == [
+        f"prepare:{plan.assignments[0].assignment_digest}",
+        f"finalize:{plan.assignments[0].assignment_digest}",
+    ]
