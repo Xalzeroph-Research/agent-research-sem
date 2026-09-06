@@ -405,6 +405,10 @@ class RealMinecraftEnvironment:
                         ),
                         evidence_closed=bool(task_results) and all(
                             isinstance(item.get("outcome"), Mapping)
+                            and (
+                                bool(item.get("anchors"))
+                                or bool(item.get("outcome", {}).get("evidence"))
+                            )
                             for item in task_results
                         ),
                         outcome_codes=tuple(

@@ -60,12 +60,14 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             adaptive=treatment != "fixed_memory",
             initial_memory=(f"seed={assignment.seed}",),
         )
-        results = self.environment.run_suite(
-            session=session,
-            variant_id=assignment.variant_id,
-            seed=assignment.seed,
-        )
-        session.close()
+        try:
+            results = self.environment.run_suite(
+                session=session,
+                variant_id=assignment.variant_id,
+                seed=assignment.seed,
+            )
+        finally:
+            session.close()
         count = len(results)
         success_count = sum(item.success for item in results)
         return StudyMetricObservation(

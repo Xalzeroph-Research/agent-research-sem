@@ -58,6 +58,11 @@ class RuleBasedEvolver:
             "timeout": "Use shorter action batches and re-observe before continuing.",
             "blocked": "Verify prerequisites and retry from the last grounded state.",
             "missing": "Record the missing prerequisite before planning the next action.",
+            "precondition_missing": "Query the grounded state before selecting a dependency-producing action.",
+            "path_interrupted": "Re-observe the route and use a bounded movement segment.",
+            "no_threats": "Do not treat an empty threat set as combat success.",
+            "partial_effect": "Reconcile effect receipt before issuing a retry.",
+            "provider_error": "Record provider failure and stop unsafe retries.",
         }
         matched = next((key for key in signals if key in failure), None)
         if matched is None and failure:
