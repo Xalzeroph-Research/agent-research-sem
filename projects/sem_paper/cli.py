@@ -44,16 +44,17 @@ def main(argv: list[str] | None = None) -> int:
             ],
         }
     elif args.command == "real-pilot":
-        report = run_real_pilot()
+        plan, observation = run_real_pilot()
         payload = {
             "environment": "minecraft.mineflayer.jsonl.v1",
-            "protocol_digest": report.protocol_digest,
-            "observations": len(report.observations),
-            "aggregates": [
-                {"variant_id": row.variant_id, "metric": row.metric_name,
-                 "count": row.count, "mean": row.mean}
-                for row in report.aggregates
-            ],
+            "protocol_digest": plan.protocol_digest,
+            "plan_digest": plan.plan_digest,
+            "assignment": {
+                "variant_id": observation.assignment.variant_id,
+                "repetition": observation.assignment.repetition,
+                "seed": observation.assignment.seed,
+            },
+            "metrics": dict(observation.metrics),
             "claim_status": "pilot_not_claim_ready",
         }
     else:

@@ -89,12 +89,16 @@ def run_confirmatory_smoke() -> StudyMatrixExecutionReport:
     return SEMExperimentRunner(plan, ScriptedMinecraftEnvironment()).run()
 
 
-def run_real_pilot() -> StudyMatrixExecutionReport:
+def run_real_pilot():
     from projects.sem_paper.experiments.protocol import compile_sem_paper_experiment_plan
 
     plan = compile_sem_paper_experiment_plan()
     runner = SEMExperimentRunner(plan, RealMinecraftEnvironment())
-    return runner.run(assignments=plan.assignments[:1])
+    assignment = plan.assignments[0]
+    observation = runner._execute_assignment(
+        assignment, plan.binding_for(assignment.variant_id)
+    )
+    return plan, observation
 
 
 __all__ = ["SEMExperimentRunner", "run_confirmatory_smoke", "run_real_pilot"]
