@@ -1,13 +1,18 @@
 from .core import (
+    EvidenceEvent,
     EvolutionCandidate,
     EvolutionEdit,
     MemoryEntry,
-    RuleBasedEvolver,
     SEMMethodSession,
+    SEM_METHOD_ID,
+    SEM_TREATMENTS,
+    SemanticEdit,
+    StructuralDemand,
 )
 from .adapter import SemMethodAgentMemoryAdapter
 
 __all__ = [
-    "EvolutionCandidate", "EvolutionEdit", "MemoryEntry",
-    "RuleBasedEvolver", "SEMMethodSession", "SemMethodAgentMemoryAdapter",
+    "EvidenceEvent", "EvolutionCandidate", "EvolutionEdit", "MemoryEntry",
+    "SEMMethodSession", "SEM_METHOD_ID", "SEM_TREATMENTS",
+    "SemanticEdit", "StructuralDemand", "SemMethodAgentMemoryAdapter",
 ]
