@@ -5,7 +5,7 @@ import json
 
 from projects.sem_paper.api import PROJECT_MANIFEST
 from projects.sem_paper.composition import run_confirmatory_smoke
-from projects.sem_paper.composition.runner import run_real_pilot
+from projects.sem_paper.composition.runner import run_real_matrix, run_real_pilot
 from projects.sem_paper.experiments import (
     build_benchmark,
     build_sem_paper_confirmatory_protocol,
@@ -16,7 +16,7 @@ from projects.sem_paper.experiments import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sem")
-    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "real-pilot"))
+    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "real-pilot", "real"))
     args = parser.parse_args(argv)
     if args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()
@@ -42,6 +42,21 @@ def main(argv: list[str] | None = None) -> int:
                 {"variant_id": item.variant_id, "repetition": item.repetition, "seed": item.seed}
                 for item in plan.assignments
             ],
+        }
+    elif args.command == "real":
+        report = run_real_matrix()
+        payload = {
+            "environment": "minecraft.mineflayer.jsonl.v1",
+            "protocol_digest": report.protocol_digest,
+            "plan_digest": report.plan_digest,
+            "observations": len(report.observations),
+            "aggregates": [
+                {"variant_id": row.variant_id, "metric": row.metric_name,
+                 "count": row.count, "mean": row.mean}
+                for row in report.aggregates
+            ],
+            "claim_status": "exploratory_real_matrix",
+            "world_reset_per_assignment": False,
         }
     elif args.command == "real-pilot":
         plan, observation = run_real_pilot()

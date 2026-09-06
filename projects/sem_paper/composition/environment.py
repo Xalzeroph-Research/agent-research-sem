@@ -177,7 +177,8 @@ class ScriptedMinecraftEnvironment:
 
 
 class _MinecraftBridgeClient:
-    def __init__(self) -> None:
+    def __init__(self, run_identity: str) -> None:
+        self.run_identity = run_identity
         self.node = os.environ.get("MC_NODE", "/usr/local/bin/node")
         self.script = os.environ.get(
             "MC_BRIDGE_SCRIPT",
@@ -203,7 +204,7 @@ class _MinecraftBridgeClient:
         if self.process is None or self.process.stdin is None or self.process.stdout is None:
             raise RuntimeError("Minecraft bridge is not running")
         self._counter += 1
-        request_id = f"sem-real-{self._counter}"
+        request_id = f"{self.run_identity}-request-{self._counter}"
         message = {**payload, "request_id": request_id}
         self.process.stdin.write(json.dumps(message, sort_keys=True) + "\n")
         self.process.stdin.flush()
@@ -261,7 +262,7 @@ class _MinecraftBridgeClient:
         timeout_s: float,
     ) -> dict[str, Any]:
         self._counter += 1
-        action_id = f"sem-real-action-{self._counter}"
+        action_id = f"{self.run_identity}-action-{self._counter}"
         request = {
             "cmd": action_type,
             "action_id": action_id,
@@ -336,7 +337,9 @@ class RealMinecraftEnvironment:
         variant_id: str,
         seed: str,
     ) -> tuple[EnvironmentTaskResult, ...]:
-        bridge = _MinecraftBridgeClient()
+        bridge = _MinecraftBridgeClient(
+            run_identity=session.session_id.replace(":", "-")
+        )
         bridge.start()
         results: list[EnvironmentTaskResult] = []
         try:

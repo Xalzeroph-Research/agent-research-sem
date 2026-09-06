@@ -89,6 +89,13 @@ def run_confirmatory_smoke() -> StudyMatrixExecutionReport:
     return SEMExperimentRunner(plan, ScriptedMinecraftEnvironment()).run()
 
 
+def run_real_matrix() -> StudyMatrixExecutionReport:
+    from projects.sem_paper.experiments.protocol import compile_sem_paper_experiment_plan
+
+    plan = compile_sem_paper_experiment_plan()
+    return SEMExperimentRunner(plan, RealMinecraftEnvironment()).run()
+
+
 def run_real_pilot():
     from projects.sem_paper.experiments.protocol import compile_sem_paper_experiment_plan
 
@@ -101,4 +108,4 @@ def run_real_pilot():
     return plan, observation
 
 
-__all__ = ["SEMExperimentRunner", "run_confirmatory_smoke", "run_real_pilot"]
+__all__ = ["SEMExperimentRunner", "run_confirmatory_smoke", "run_real_matrix", "run_real_pilot"]
