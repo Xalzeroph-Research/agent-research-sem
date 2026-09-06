@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -347,6 +348,12 @@ class RealMinecraftEnvironment:
             "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
         )
         recovery_dir = os.path.join(recovery_root, run_identity)
+        try:
+            Path(recovery_dir).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Minecraft assignment recovery directory is not writable: {recovery_dir}"
+            ) from exc
         bridge = _MinecraftBridgeClient(run_identity=run_identity)
         bridge.recovery_dir = recovery_dir
         bridge.start()
