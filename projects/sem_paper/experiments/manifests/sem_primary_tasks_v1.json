@@ -1,0 +1,128 @@
+{
+  "manifest_id": "sem_paper_minecraft_primary_v1",
+  "profile": "primary-core-six",
+  "schema_version": "sem-paper.minecraft.primary-tasks.v1",
+  "task_families": [
+    "resource_collection",
+    "crafting_tech_tree",
+    "navigation_return",
+    "combat_survival",
+    "simple_building",
+    "long_horizon_mixed"
+  ],
+  "tasks": [
+    {
+      "task_id": "primary_resource_collection_v1",
+      "family": "resource_collection",
+      "goal": "Collect at least four natural log blocks from the nearby world.",
+      "context": "primary_resource_collection",
+      "lineage_id": "primary_resource_collection_v1",
+      "max_steps": 48,
+      "max_seconds": 240.0,
+      "success": {
+        "kind": "inventory_min",
+        "item": "re:.*_log$",
+        "count": 4
+      }
+    },
+    {
+      "task_id": "primary_crafting_tech_tree_v1",
+      "family": "crafting_tech_tree",
+      "goal": "Craft one stone pickaxe from collected resources.",
+      "context": "primary_crafting_tech_tree",
+      "lineage_id": "primary_crafting_tech_tree_v1",
+      "depends_on_task_ids": [
+        "primary_resource_collection_v1"
+      ],
+      "max_steps": 72,
+      "max_seconds": 300.0,
+      "success": {
+        "kind": "inventory_min",
+        "item": "stone_pickaxe",
+        "count": 1
+      }
+    },
+    {
+      "task_id": "primary_navigation_return_v1",
+      "family": "navigation_return",
+      "goal": "Navigate at least 16 blocks away from the recorded spawn anchor, then return within 5 blocks.",
+      "context": "primary_navigation_return; success requires verified movement evidence for both departure and later return",
+      "lineage_id": "primary_navigation_return_v1",
+      "referenced_anchors": [
+        "spawn"
+      ],
+      "max_steps": 64,
+      "max_seconds": 300.0,
+      "success": {
+        "kind": "away_then_return",
+        "anchor": "spawn",
+        "min_departure_distance": 16,
+        "return_radius": 5
+      }
+    },
+    {
+      "task_id": "primary_combat_survival_v1",
+      "family": "combat_survival",
+      "goal": "Engage at least one available hostile with a strongly verified combat action and remain alive.",
+      "context": "primary_combat_survival; no-threat or merely attempted combat is not success",
+      "lineage_id": "primary_combat_survival_v1",
+      "max_steps": 64,
+      "max_seconds": 300.0,
+      "success": {
+        "kind": "combat_survived",
+        "min_verified_combat_actions": 1
+      }
+    },
+    {
+      "task_id": "primary_simple_building_v1",
+      "family": "simple_building",
+      "goal": "Build a workbench/storage station near the recorded spawn anchor and verify the finished structure.",
+      "context": "primary_simple_building; relative to floored spawn: crafting_table at (+2,0,0), chest at (+3,0,0); success requires grounded verified placement evidence for the complete blueprint",
+      "lineage_id": "primary_simple_building_v1",
+      "max_steps": 96,
+      "max_seconds": 360.0,
+      "success": {
+        "kind": "blueprint_complete",
+        "anchor": "spawn",
+        "blocks": [
+          {
+            "offset": {
+              "x": 2,
+              "y": 0,
+              "z": 0
+            },
+            "block": "crafting_table"
+          },
+          {
+            "offset": {
+              "x": 3,
+              "y": 0,
+              "z": 0
+            },
+            "block": "chest"
+          }
+        ]
+      },
+      "referenced_anchors": [
+        "spawn"
+      ]
+    },
+    {
+      "task_id": "primary_long_horizon_mixed_v1",
+      "family": "long_horizon_mixed",
+      "goal": "Gather resources, progress through crafting, and produce one shield.",
+      "context": "primary_long_horizon_mixed",
+      "lineage_id": "primary_long_horizon_mixed_v1",
+      "depends_on_task_ids": [
+        "primary_crafting_tech_tree_v1"
+      ],
+      "max_steps": 120,
+      "max_seconds": 480.0,
+      "success": {
+        "kind": "inventory_min",
+        "item": "shield",
+        "count": 1
+      }
+    }
+  ]
+}

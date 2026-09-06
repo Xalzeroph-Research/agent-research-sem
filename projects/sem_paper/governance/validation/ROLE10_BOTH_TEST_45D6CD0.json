@@ -1,0 +1,55 @@
+{
+  "schema_version": "sem-both-test-evidence.v1",
+  "evidence_class": "role10-cross-platform-validation",
+  "generated_on": "2026-08-29",
+  "claim_eligibility": "validation-only",
+  "source": {
+    "repository": "SDFGAEV-Research/agent-research-sem",
+    "branch": "sem/10-production-binding-closure",
+    "commit_sha": "45d6cd06744f523780fb2b0508e01c01feab15a9",
+    "git_tree": "e2b658cbd83f50fd783d19970b08414c62b8c804",
+    "upstream_master": "e0003c98ffa873a8d25428de8416f028bae99a99",
+    "deployment_bundle_sha256": "90dee5a5ce5ac3e22cc773674bc608bd700abf2efa6de9c1f6986d1d4f03ce57"
+  },
+  "windows": {
+    "python": "3.12.10",
+    "sem_test_files": 56,
+    "pytest_result": "232 passed, 2 skipped",
+    "pytest_exit": 0,
+    "pytest_log_sha256": "d406ef7a1198a31da5d9327cbf976a1e2cf2c409343e0c39fa81159a3db95ab6",
+    "architecture_audit_exit": 0,
+    "architecture_audit_sha256": "3b6ae433ef089a6f8a53169e9c10de38141aa408c647e0ccd9c4622c452ae4e7",
+    "blocking_open": 1
+  },
+  "server1": {
+    "authority_alias": "sem-node-1",
+    "source_snapshot": "/data1/research-platform/source/agent-research-sem-45d6cd06744f",
+    "validation_root": "/data1/research-platform/runtime/platform-state/sem-validation/role10-45d6cd06744f",
+    "python": "3.12.7",
+    "sem_test_files": 56,
+    "pytest_result": "234 passed",
+    "pytest_exit": 0,
+    "pytest_log_sha256": "aab5d15118d870b35b030673ff43d29eaa34f529ef8886194d803ebeec2303e4",
+    "architecture_audit_exit": 0,
+    "architecture_audit_sha256": "71e4dbf80867ffb0b7f4883fbcb0a5c4bb5d28280c9c4e8898fb76ab60dfda28",
+    "blocking_open": 1
+  },
+  "live_evidence": {
+    "accepted_t2b": "artifacts/sem_live_evidence/36bc96b118dd/t2b/T2B_GATE_RESULT.json",
+    "t2b_gate_digest": "0386cf29fd77567f36f051ebeabb7579655ba9809cb2f5571c0ceef6d31da2a7",
+    "t2b_evidence_sha256": "49040d275a474df6330d4f2c0495482b5fb4e77f8eae1804eacf27531dd48829",
+    "remaining_blocker": "qualified model closure authority lacks canary provenance handoff; qualified planner deployment closure is missing"
+  },
+  "platform_dependency": {
+    "owner_branch": "system/06-participant-model-renovation",
+    "owner_commit_sha": "70713c7d32b5e4b9cd785f386608e857cc3bddd7",
+    "owner_commit_subject": "fix(model): freeze runtime canary request identity",
+    "owner_remote_exact": true,
+    "upstream_master_contains_owner": false,
+    "sem_public_provenance_contract_ready": false,
+    "remaining_contract_gaps": [
+      "durable runtime-canary evidence lacks independently reconstructable probe/request-body identity",
+      "qualified model endpoint binding lacks content-derived runtime-canary evidence identity"
+    ]
+  }
+}

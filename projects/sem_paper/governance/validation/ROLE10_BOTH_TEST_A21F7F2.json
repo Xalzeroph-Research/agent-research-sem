@@ -1,0 +1,43 @@
+{
+    "schema_version":  "sem-both-test-evidence.v1",
+    "evidence_class":  "role10-cross-platform-validation",
+    "generated_on":  "2026-08-29",
+    "claim_eligibility":  "validation-only",
+    "source":  {
+                   "repository":  "SDFGAEV-Research/agent-research-sem",
+                   "branch":  "sem/10-production-binding-closure",
+                   "commit_sha":  "a21f7f247c832cd5394b99af26ffc49c537a704f",
+                   "git_tree":  "4d1fc029e93ab1b587475755b3e30526cefe24ee",
+                   "upstream_master":  "e0003c98ffa873a8d25428de8416f028bae99a99",
+                   "deployment_bundle_sha256":  "3619a0590055700d8f2c4ce5cc34c5aa6569f76c627b202877a21472ab1caff9"
+               },
+    "windows":  {
+                    "python":  "3.12.10",
+                    "sem_test_files":  55,
+                    "pytest_result":  "227 passed, 2 skipped",
+                    "pytest_exit":  0,
+                    "pytest_log_sha256":  "e4b8b4a0232cb22d26b0169079bf8e15641772e0632b8814683d6f4ba065fecb",
+                    "architecture_audit_exit":  0,
+                    "architecture_audit_sha256":  "ac51a6003702e4a2f7538adbb18e5417dec6dd6eb7763e9718dca907d6915b1f",
+                    "blocking_open":  1
+                },
+    "server1":  {
+                    "authority_alias":  "sem-node-1",
+                    "source_snapshot":  "/data1/research-platform/source/agent-research-sem-a21f7f247c83",
+                    "validation_root":  "/data1/research-platform/runtime/platform-state/sem-validation/role10-a21f7f247c83",
+                    "python":  "3.12.7",
+                    "sem_test_files":  55,
+                    "pytest_result":  "229 passed",
+                    "pytest_exit":  0,
+                    "pytest_log_sha256":  "33a568d0c3211f2d51d9dbea34b0e6e96cc73869f435af3cdaf8b1d294c0d005",
+                    "architecture_audit_exit":  0,
+                    "architecture_audit_sha256":  "19c2a2e865c20d0907d0415eb1cb4889837780289a7e666a7b44e90750af6789",
+                    "blocking_open":  1
+                },
+    "live_evidence":  {
+                          "accepted_t2b":  "artifacts/sem_live_evidence/e8eaa5c7722f/t2b/T2B_GATE_RESULT.json",
+                          "t2b_gate_digest":  "ced2ab216644fb9e41da4636205f59846bc29f820d804e856df7a886752c4c53",
+                          "t2b_evidence_sha256":  "a69481f49bc5e3cf04acaae10abed4ec6bb6e322493c0572596bb79a3de9e109",
+                          "remaining_blocker":  "qualified planner deployment closure is missing"
+                      }
+}

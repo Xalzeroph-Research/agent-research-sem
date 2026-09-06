@@ -1,0 +1,61 @@
+{
+    "schema_version":  "sem-role09-role10-handoff.v1",
+    "generated_on":  "2026-08-29",
+    "claim_eligibility":  "validation-only",
+    "role09":  {
+                   "branch":  "sem/09-method-renovation",
+                   "commit_sha":  "2aa1d7ea00d07e223fcbed6652ee630d84f1237d",
+                   "integration_merge_sha":  "f37a84fc26852dafae72d7ca1297258bb0c6e143"
+               },
+    "role10":  {
+                   "branch":  "sem/10-production-binding-closure",
+                   "consumer_cutover_sha":  "cc6faafbad8f06f517477ad5e5ca9eee5f3cec85",
+                   "evidence_commit_sha":  "584fca57162b3d7d21522fecb0665442c7382935"
+               },
+    "consumer_cutover":  {
+                             "historical_import":  "projects.sem_paper.method.self_evolving_memory.evolution.diagnostics.AutomaticSliceDiscovery",
+                             "authoritative_import":  "projects.sem_paper.method.self_evolving_memory.evolution.slicing.AutomaticSliceDiscovery",
+                             "production_historical_reference_count":  0,
+                             "role09_compatibility_module":  "projects/sem_paper/method/self_evolving_memory/evolution/diagnostics.py",
+                             "role09_cleanup_ready":  true,
+                             "cleanup_owner":  "ROLE09"
+                         },
+    "t2b":  {
+                "runtime_commit_sha":  "cc6faafbad8f06f517477ad5e5ca9eee5f3cec85",
+                "git_tree":  "9d8cadbc3496d0a5ee96ac06aaf6b3e8f3a4f25f",
+                "deployment_bundle_sha256":  "2b40cab0a3d383da4c2e8d18963d7f4ee06cfcf536c51f4e6ef523ac47b17396",
+                "server_run_root":  "/data1/research-platform/runtime/platform-state/t2b/role10-cc6faafbad8f-20260829T063222Z",
+                "gate_digest":  "db6288c85fe804aa50dc0c42da224916a299c6d72e2a41705c49c96495d47302",
+                "gate_result_sha256":  "6ba55b9eb2a4920aa1b63e4f416b0962ccd802a01220832121182b4cafc07406",
+                "evidence_zip_sha256":  "11e4148583ab2661a8d9193990c0c9c152a1be8000ee9bb86b6aac1bf9c477ab",
+                "verifier_ok":  true,
+                "current":  true
+            },
+    "windows":  {
+                    "source_commit_sha":  "584fca57162b3d7d21522fecb0665442c7382935",
+                    "sem_test_files":  68,
+                    "pytest_result":  "461 passed, 2 skipped",
+                    "pytest_exit":  0,
+                    "pytest_log_sha256":  "67c72cd68bef846ad4f4f8879fe7ab5ecbaaed55370dea2dfbff0ca10cf1a61b",
+                    "architecture_audit_exit":  0,
+                    "architecture_audit_sha256":  "270755064b8faa847384bb78bc8eaa8c8c2f4ad7abb54cfea3deb382ac6e9e76",
+                    "blocking_open":  1
+                },
+    "server1":  {
+                    "source_commit_sha":  "584fca57162b3d7d21522fecb0665442c7382935",
+                    "source_tree":  "143af4d58bd40768b1ca5771e48926b9c8778755",
+                    "deployment_bundle_sha256":  "a13ca386cbda2fd456c283cdeef0d5a8e16a960f9423af2813b983228e8eb9e5",
+                    "source_snapshot":  "/data1/research-platform/source/agent-research-sem-584fca57162b",
+                    "validation_root":  "/data1/research-platform/runtime/platform-state/sem-validation/role10-584fca57162b",
+                    "upstream_master_ref":  "e0003c98ffa873a8d25428de8416f028bae99a99",
+                    "initial_pytest_result":  "1 failed, 462 passed; failure solely because bundle clone lacked refs/remotes/upstream/master",
+                    "initial_pytest_log_sha256":  "5234ad75c58a45cc5efc0ec2f0895d342ae9bcf8a1c63ddad42f96ad9eed70f2",
+                    "pytest_result":  "463 passed",
+                    "pytest_exit":  0,
+                    "pytest_log_sha256":  "d83196312b10e6c8d6dd81e0cfa00761551e65d87cb539ad36d3dfcd2aa2eeca",
+                    "architecture_audit_exit":  0,
+                    "architecture_audit_sha256":  "4e250c2f32ff0bbb229a852dbf691e6f36f5b9a9248adc9ef40559f243fd5ed8",
+                    "blocking_open":  1
+                },
+    "remaining_blocker":  "qualified model closure authority lacks canary provenance handoff; qualified planner deployment closure is missing"
+}

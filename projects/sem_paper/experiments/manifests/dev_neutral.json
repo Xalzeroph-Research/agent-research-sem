@@ -1,0 +1,56 @@
+{
+  "manifest_id": "sem_paper_dev_neutral_v1",
+  "tasks": [
+    {
+      "task_id": "t01_observe",
+      "family": "exploration",
+      "goal": "Observe the nearby environment and establish the current grounded state.",
+      "max_steps": 2,
+      "success": {"kind": "always"}
+    },
+    {
+      "task_id": "t02_logs",
+      "family": "gather",
+      "goal": "Obtain at least 2 natural log blocks from nearby trees.",
+      "context": "early_resource_gathering",
+      "max_steps": 8,
+      "success": {"kind": "inventory_min", "item": "re:.*_log$", "count": 2}
+    },
+    {
+      "task_id": "t03_planks",
+      "family": "craft",
+      "goal": "Convert available wood into at least 4 wooden planks of any wood type.",
+      "context": "early_crafting",
+      "depends_on_task_ids": ["t02_logs"],
+      "max_steps": 8,
+      "success": {"kind": "inventory_min", "item": "re:.*_planks$", "count": 4}
+    },
+    {
+      "task_id": "t04_table",
+      "family": "craft",
+      "goal": "Craft one crafting table using available wooden planks.",
+      "context": "early_crafting",
+      "depends_on_task_ids": ["t03_planks"],
+      "max_steps": 8,
+      "success": {"kind": "inventory_min", "item": "crafting_table", "count": 1}
+    },
+    {
+      "task_id": "t05_revisit_spawn",
+      "family": "navigation",
+      "goal": "Return close to the spawn position observed at the beginning of this lifetime.",
+      "context": "revisit_known_location",
+      "referenced_anchors": ["spawn"],
+      "depends_on_task_ids": ["t01_observe"],
+      "max_steps": 8,
+      "success": {"kind": "near_anchor", "anchor": "spawn", "radius": 4}
+    },
+    {
+      "task_id": "t06_logs_again",
+      "family": "gather",
+      "goal": "Obtain at least 4 total natural log blocks, using prior experience if useful.",
+      "context": "early_resource_gathering",
+      "max_steps": 8,
+      "success": {"kind": "inventory_min", "item": "re:.*_log$", "count": 4}
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+    "schema_version":  "sem-model-live-diagnostic.v1",
+    "evidence_class":  "qualified-model-prepublication-diagnostic",
+    "observed_on":  "2026-08-29",
+    "claim_eligibility":  "diagnostic-only",
+    "formal_status":  "BLOCKED_ON_PLATFORM_QUALIFIED_CLOSURE",
+    "server":  {
+                   "authority_alias":  "sem-node-1",
+                   "container_name":  "sem-qwen38-qualification-tp2",
+                   "container_id":  "1a2519404f2116dc7cd524fe8b0391042b2474f145c13dc2b6adaee43b762efd",
+                   "image_id":  "sha256:e0cfcfcb9b86e2c2d0d52a93689773f20f380cb8e050a24ce550c44f6f55c5eb",
+                   "process_pid":  82273,
+                   "started_at":  "2026-08-27T18:09:43.068552411Z",
+                   "endpoint":  "http://127.0.0.1:30080/v1/chat/completions"
+               },
+    "request":  {
+                    "sha256":  "4269f5cbc13b239b861a91fac0d94e27ad79021ef7e58f3f1e2fa0775db62c40",
+                    "body":  {
+                                 "model":  "sem-qwen38-27b",
+                                 "messages":  [
+                                                  {
+                                                      "role":  "user",
+                                                      "content":  "Return exactly this JSON object and nothing else: {\"status\":\"ok\"}"
+                                                  }
+                                              ],
+                                 "temperature":  0,
+                                 "top_p":  1,
+                                 "max_tokens":  128,
+                                 "chat_template_kwargs":  {
+                                                              "enable_thinking":  false
+                                                          },
+                                 "response_format":  {
+                                                         "type":  "json_object"
+                                                     }
+                             }
+                },
+    "response":  {
+                     "sha256":  "bf0f3507eb36707eeda8ba701bcb24a3c6eff4a4ce22c44c48e612be48cb4887",
+                     "body":  {
+                                  "id":  "chatcmpl-aa91a4427a7b1129",
+                                  "object":  "chat.completion",
+                                  "created":  1787977162,
+                                  "model":  "sem-qwen38-27b",
+                                  "choices":  [
+                                                  {
+                                                      "index":  0,
+                                                      "message":  {
+                                                                      "role":  "assistant",
+                                                                      "content":  "{\"status\":\"ok\"}",
+                                                                      "refusal":  null,
+                                                                      "annotations":  null,
+                                                                      "audio":  null,
+                                                                      "function_call":  null,
+                                                                      "reasoning":  null
+                                                                  },
+                                                      "logprobs":  null,
+                                                      "finish_reason":  "stop",
+                                                      "stop_reason":  null,
+                                                      "token_ids":  null,
+                                                      "routed_experts":  null
+                                                  }
+                                              ],
+                                  "service_tier":  null,
+                                  "system_fingerprint":  "vllm-0.27.1-tp2-d6528af1",
+                                  "usage":  {
+                                                "prompt_tokens":  26,
+                                                "total_tokens":  32,
+                                                "completion_tokens":  6,
+                                                "prompt_tokens_details":  null
+                                            },
+                                  "prompt_logprobs":  null,
+                                  "prompt_token_ids":  null,
+                                  "prompt_text":  null,
+                                  "kv_transfer_params":  null,
+                                  "ec_transfer_params":  null,
+                                  "metrics":  null
+                              }
+                 },
+    "acceptance":  {
+                       "visible_content_exact":  "{\"status\":\"ok\"}",
+                       "finish_reason":  "stop",
+                       "reasoning":  null,
+                       "passed":  true
+                   },
+    "note":  "This is fresh live diagnostic evidence only. It does not replace the platform-owned runtime canary evidence, runtime qualification receipt, or qualified deployment closure."
+}

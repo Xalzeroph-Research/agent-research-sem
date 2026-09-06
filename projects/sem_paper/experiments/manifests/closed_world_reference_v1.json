@@ -1,0 +1,40 @@
+{
+  "manifest_id": "sem_paper_closed_world_reference_v1",
+  "tasks": [
+    {
+      "task_id": "cw01_visit_forest",
+      "family": "navigation",
+      "objective": "Reach the forest from the reference-world hub.",
+      "context": {"kind": "visit", "target": "forest"},
+      "max_steps": 4,
+      "max_seconds": 30.0
+    },
+    {
+      "task_id": "cw02_collect_wood",
+      "family": "gather",
+      "objective": "Hold at least one unit of wood from the grounded forest resource.",
+      "context": {"kind": "collect", "target": "wood", "quantity": 1},
+      "depends_on_task_ids": ["cw01_visit_forest"],
+      "max_steps": 4,
+      "max_seconds": 30.0
+    },
+    {
+      "task_id": "cw03_craft_planks",
+      "family": "craft",
+      "objective": "Craft one unit of planks at the declared workshop.",
+      "context": {"kind": "craft", "target": "planks", "quantity": 1},
+      "depends_on_task_ids": ["cw02_collect_wood"],
+      "max_steps": 6,
+      "max_seconds": 30.0
+    },
+    {
+      "task_id": "cw04_visit_shelter",
+      "family": "navigation",
+      "objective": "Reach the shelter after completing the resource sequence.",
+      "context": {"kind": "visit", "target": "shelter"},
+      "depends_on_task_ids": ["cw03_craft_planks"],
+      "max_steps": 4,
+      "max_seconds": 30.0
+    }
+  ]
+}
