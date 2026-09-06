@@ -14,7 +14,11 @@ from projects.sem_paper.method.self_evolving_memory import (
     SEMMethodSession,
     SemMethodAgentMemoryAdapter,
 )
-from projects.sem_paper.benchmarks import JsonTaskBenchmarkAdapter
+from projects.sem_paper.benchmarks import (
+    JsonTaskBenchmarkAdapter,
+    memory_agent_bench_adapter,
+    minedojo_adapter,
+)
 
 
 def test_manifest_uses_new_project_contract() -> None:
@@ -80,6 +84,8 @@ def test_external_benchmark_metadata_adapter(tmp_path) -> None:
     benchmark = JsonTaskBenchmarkAdapter("memory-agent-bench").build(source)
     assert benchmark.benchmark_id == "memory-agent-bench"
     assert benchmark.tasks[0].task_id == "m1"
+    assert minedojo_adapter().benchmark_id == "minedojo"
+    assert memory_agent_bench_adapter().benchmark_id == "memory-agent-bench"
 
 
 def test_scripted_environment_is_recoverable() -> None:

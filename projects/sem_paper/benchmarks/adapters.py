@@ -32,6 +32,16 @@ def load_benchmark_tasks(path: str | Path) -> tuple[Mapping[str, Any], ...]:
     return tuple(normalized)
 
 
+def minedojo_adapter() -> JsonTaskBenchmarkAdapter:
+    """Metadata adapter for MineDojo programmatic task exports."""
+    return JsonTaskBenchmarkAdapter("minedojo", "programmatic-export-v1")
+
+
+def memory_agent_bench_adapter() -> JsonTaskBenchmarkAdapter:
+    """Metadata adapter for MemoryAgentBench task exports."""
+    return JsonTaskBenchmarkAdapter("memory-agent-bench", "multi-turn-export-v1")
+
+
 class JsonTaskBenchmarkAdapter:
     """Import task metadata without importing benchmark runtime code.
 
