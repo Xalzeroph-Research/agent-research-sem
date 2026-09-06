@@ -223,8 +223,6 @@ class _MinecraftBridgeClient:
             elif value.get("type") == "ack":
                 ack = value
             if ack is not None and wait_kinds.issubset(events):
-                if ack.get("verified") is False:
-                    raise RuntimeError(str(ack.get("error") or ack))
                 return ack, events
         raise TimeoutError(f"Minecraft bridge request timed out: {payload.get('cmd')}")
 
@@ -237,7 +235,7 @@ class _MinecraftBridgeClient:
             text=True,
             bufsize=1,
         )
-        self._request(
+        ack, _ = self._request(
             {
                 "cmd": "connect",
                 "host": self.host,
@@ -250,6 +248,8 @@ class _MinecraftBridgeClient:
             wait_kinds=frozenset({"bridge_status", "self_snapshot"}),
             timeout_s=90.0,
         )
+        if ack.get("verified") is False:
+            raise RuntimeError(str(ack.get("error") or ack))
 
     def action(
         self,
