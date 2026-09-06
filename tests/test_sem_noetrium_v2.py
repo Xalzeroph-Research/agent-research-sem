@@ -1,135 +1,165 @@
 from __future__ import annotations
 
-from projects.sem_paper.api import PROJECT_MANIFEST
-from projects.sem_paper.composition import ScriptedMinecraftEnvironment
-from projects.sem_paper.composition.runner import SEMExperimentRunner
-from projects.sem_paper.experiments import (
-    build_benchmark,
-    build_sem_paper_confirmatory_protocol,
-    compile_sem_paper_experiment_plan,
-    is_confirmatory_protocol,
-)
+import pytest
+
+from noetrium.contracts import MethodTaskOutcome, RecallRequest
+
 from projects.sem_paper.method.self_evolving_memory import (
-    RuleBasedEvolver,
     SEMMethodSession,
+    SEM_TREATMENTS,
     SemMethodAgentMemoryAdapter,
 )
-from projects.sem_paper.benchmarks import (
-    JsonTaskBenchmarkAdapter,
-    memory_agent_bench_adapter,
-    minedojo_adapter,
-)
 
 
-def test_manifest_uses_new_project_contract() -> None:
-    assert PROJECT_MANIFEST.identity.project_id == "sem-paper"
-    assert len(PROJECT_MANIFEST.capability_requirements) == 3
-
-
-def test_protocol_and_plan_are_complete() -> None:
-    protocol = build_sem_paper_confirmatory_protocol()
-    plan = compile_sem_paper_experiment_plan(protocol)
-    assert is_confirmatory_protocol(protocol)
-    assert len(protocol.variants) == 6
-    assert len(plan.assignments) == 72
-    plan.assert_consistent()
-
-
-def test_method_evolves_and_restores() -> None:
-    method = SEMMethodSession(
-        session_id="test", treatment_id="self_evolving",
-        seed="Seed-C", adaptive=True,
+def _failure(task_id: str, failure: str) -> MethodTaskOutcome:
+    return MethodTaskOutcome(
+        task_id=task_id,
+        family="resource",
+        lineage_id=task_id,
+        success=False,
+        utility=-1.0,
+        steps=3,
+        failure_reason=failure,
+        memory_queries=1,
     )
-    candidate = RuleBasedEvolver().propose("timeout", "task")
-    assert candidate.status == "PROPOSED"
-    method.task_completed({
-        "task_id": "t1", "family": "x", "lineage_id": "t1",
-        "success": False, "utility": -1, "steps": 2, "failure_reason": "timeout",
-    }, None)
-    snapshot = method.checkpoint()
-    restored = SEMMethodSession(
-        session_id="test", treatment_id="self_evolving",
-        seed="Seed-C", adaptive=True,
+
+
+def test_treatment_surface_is_final() -> None:
+    assert SEM_TREATMENTS == frozenset(
+        {"no_memory", "flat_episodic", "fixed_typed", "sem"}
     )
-    restored.restore(snapshot)
-    assert restored.generation == method.generation
-    assert restored.diagnostics()["entry_count"] == method.diagnostics()["entry_count"]
+    with pytest.raises(ValueError):
+        SEMMethodSession(
+            session_id="legacy",
+            treatment_id="self_evolving",
+            seed="run",
+        )
 
 
-def test_method_owns_real_action_plan() -> None:
-    method = SEMMethodSession(
-        session_id="plan", treatment_id="fixed_memory",
-        seed="Seed-C", adaptive=False,
+def test_fixed_typed_initial_architecture_is_stable() -> None:
+    session = SEMMethodSession(
+        session_id="fixed",
+        treatment_id="fixed_typed",
+        seed="run",
     )
-    plan = method.plan_actions({"family": "combat_survival"})
-    assert plan[0][0] == "defend_self"
-    assert plan[0][1]["max_targets"] == 1
+    diagnostics = session.diagnostics()
+    assert diagnostics["node_count"] == 3
+    assert diagnostics["edge_count"] == 2
+    assert diagnostics["adopted_count"] == 0
 
 
-def test_agent_memory_adapter_keeps_method_generation() -> None:
-    method = SEMMethodSession(
-        session_id="agent", treatment_id="fixed_memory",
-        seed="Seed-X", adaptive=False,
+def test_sem_creates_semantic_slot_and_backfills_evidence() -> None:
+    session = SEMMethodSession(
+        session_id="create",
+        treatment_id="sem",
+        seed="run",
     )
-    adapter = SemMethodAgentMemoryAdapter(method)
-    assert adapter.session is method
-
-
-def test_external_benchmark_metadata_adapter(tmp_path) -> None:
-    source = tmp_path / "tasks.json"
-    source.write_text(
-        '{"tasks":[{"task_id":"m1","goal":"remember this","family":"memory"}]}',
-        encoding="utf-8",
+    session.ingest(
+        {
+            "task_id": "prior",
+            "family": "resource",
+            "state": {"inventory": ["oak_log"]},
+        },
+        None,
     )
-    benchmark = JsonTaskBenchmarkAdapter("memory-agent-bench").build(source)
-    assert benchmark.benchmark_id == "memory-agent-bench"
-    assert benchmark.tasks[0].task_id == "m1"
-    assert minedojo_adapter().benchmark_id == "minedojo"
-    assert memory_agent_bench_adapter().benchmark_id == "memory-agent-bench"
+    session.task_completed(_failure("failed", "precondition_missing"), {"task_id": "failed"})
+    diagnostics = session.diagnostics()
+    assert diagnostics["structural_mismatch_count"] == 1
+    assert diagnostics["candidate_count"] == 1
+    assert diagnostics["adopted_count"] == 1
+    assert diagnostics["historical_backfill_count"] >= 1
+    assert len(session.recall(RecallRequest("precondition_missing", None)).artifacts) >= 1
 
 
-def test_scripted_environment_is_recoverable() -> None:
-    environment = ScriptedMinecraftEnvironment()
-    assert environment.capabilities.supported
-    session = environment.open_session(session_id="env", services=object())
-    payload = session.checkpoint()
-    session.restore(payload)
-    session.close()
-
-
-def test_smoke_report_is_complete() -> None:
-    plan = compile_sem_paper_experiment_plan()
-    report = SEMExperimentRunner(plan, ScriptedMinecraftEnvironment()).run()
-    assert len(build_benchmark().tasks) == 6
-    assert len(report.observations) == 72
-    assert report.plan_digest == plan.plan_digest
-
-def test_runner_delegates_assignment_lifecycle_to_generic_port() -> None:
-    plan = compile_sem_paper_experiment_plan()
-    events: list[str] = []
-
-    class Isolation:
-        def prepare_assignment(self, identity):
-            events.append(f"prepare:{identity.assignment_id}")
-            return object()
-
-        def finalize_assignment(self, identity, receipt):
-            events.append(f"finalize:{identity.assignment_id}")
-            return receipt
-
-    def factory(identity, assignment, binding):
-        assert identity.assignment_id == assignment.assignment_digest
-        assert binding.variant.variant_id == assignment.variant_id
-        return Isolation()
-
-    runner = SEMExperimentRunner(
-        plan,
-        ScriptedMinecraftEnvironment(),
-        assignment_isolation_factory=factory,
+def test_sem_supports_split_merge_and_retire() -> None:
+    session = SEMMethodSession(session_id="topology", treatment_id="sem", seed="run")
+    session.task_completed(_failure("create", "first"), {"task_id": "create"})
+    source = next(
+        node.node_id
+        for node in session._graph.snapshot().nodes
+        if node.node_id.startswith("semantic:")
     )
-    assignment = plan.assignments[0]
-    runner._execute_assignment(assignment, plan.binding_for(assignment.variant_id))
-    assert events == [
-        f"prepare:{plan.assignments[0].assignment_digest}",
-        f"finalize:{plan.assignments[0].assignment_digest}",
+    session.ingest(
+        {
+            "family": "resource",
+            "success": False,
+            "failure_reason": "split",
+            "semantic_demand": {"operation": "split", "target_ids": [source]},
+        },
+        None,
+    )
+    session.task_completed(_failure("split", "split"), {"task_id": "split"})
+    children = [
+        node.node_id
+        for node in session._graph.snapshot().nodes
+        if node.node_id.startswith(source + ":")
     ]
+    assert len(children) == 2
+    session.ingest(
+        {
+            "family": "resource",
+            "success": False,
+            "failure_reason": "merge",
+            "semantic_demand": {"operation": "merge", "target_ids": children},
+        },
+        None,
+    )
+    session.task_completed(_failure("merge", "merge"), {"task_id": "merge"})
+    assert session.diagnostics()["adopted_count"] == 3
+    session.ingest(
+        {
+            "family": "resource",
+            "success": False,
+            "failure_reason": "retire",
+            "semantic_demand": {
+                "operation": "retire",
+                "target_ids": ["semantic:resource:merged"],
+            },
+        },
+        None,
+    )
+    session.task_completed(_failure("retire", "retire"), {"task_id": "retire"})
+    assert session.diagnostics()["adopted_count"] == 4
+    assert session.diagnostics()["rejected_count"] == 0
+
+
+def test_checkpoint_restore_preserves_semantic_state() -> None:
+    session = SEMMethodSession(session_id="restore", treatment_id="sem", seed="run")
+    session.task_completed(_failure("failed", "timeout"), {"task_id": "failed"})
+    snapshot = session.checkpoint()
+    restored = SEMMethodSession(session_id="restore", treatment_id="sem", seed="run")
+    restored.restore(snapshot)
+    assert restored.diagnostics()["graph_digest"] == session.diagnostics()["graph_digest"]
+    assert restored.diagnostics()["evidence_count"] == session.diagnostics()["evidence_count"]
+    assert restored.generation == session.generation
+
+
+def test_no_memory_has_no_recall_surface() -> None:
+    session = SEMMethodSession(session_id="none", treatment_id="no_memory", seed="run")
+    session.ingest({"fact": "hidden"}, None)
+    result = session.recall(RecallRequest("hidden", None))
+    assert result.context_text == ""
+    assert result.artifacts == ()
+
+
+def test_method_does_not_own_minecraft_action_plans() -> None:
+    session = SEMMethodSession(session_id="plan", treatment_id="sem", seed="run")
+    assert session.plan_actions({"family": "combat_survival"}) == ()
+    assert session.plan_actions(
+        {
+            "action_plan": [
+                {
+                    "action_type": "observe",
+                    "arguments": {"radius": 8},
+                    "timeout_s": 10,
+                }
+            ]
+        }
+    )[0][0] == "observe"
+
+
+def test_agent_adapter_keeps_session_boundary() -> None:
+    session = SEMMethodSession(session_id="adapter", treatment_id="sem", seed="run")
+    adapter = SemMethodAgentMemoryAdapter(session)
+    assert adapter.session is session
+    assert adapter.diagnostics()["treatment_id"] == "sem"
