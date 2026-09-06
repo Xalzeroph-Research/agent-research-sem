@@ -774,6 +774,38 @@ class SEMMethodSession:
             "rejected_count": self._rejected_count,
             "backfilled_count": self._backfilled_count,
             "mismatch_count": self._mismatch_count,
+            "candidates": [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "demand": {
+                        "demand_id": candidate.demand.demand_id,
+                        "task_id": candidate.demand.task_id,
+                        "family": candidate.demand.family,
+                        "signal": candidate.demand.signal,
+                        "operation": candidate.demand.operation,
+                        "evidence_ids": list(candidate.demand.evidence_ids),
+                        "target_ids": list(candidate.demand.target_ids),
+                        "digest": candidate.demand.digest,
+                    },
+                    "edits": [
+                        {
+                            "edit_id": edit.edit_id,
+                            "operation": edit.operation,
+                            "target_id": edit.target_id,
+                            "payload": dict(edit.payload),
+                            "rationale": edit.rationale,
+                            "digest": edit.digest,
+                        }
+                        for edit in candidate.edits
+                    ],
+                    "status": candidate.status,
+                    "reason": candidate.reason,
+                    "base_graph_digest": candidate.base_graph_digest,
+                    "backfill_ids": list(candidate.backfill_ids),
+                    "digest": candidate.digest,
+                }
+                for candidate in self._candidates
+            ],
         }
         opaque = canonical_bytes(payload)
         return MethodSnapshot(
@@ -786,6 +818,12 @@ class SEMMethodSession:
         self._ensure_open()
         if snapshot.session_id != self.session_id or snapshot.method_id != SEM_METHOD_ID:
             raise ValueError("SEM snapshot identity mismatch")
+        expected_binding = canonical_digest({
+            "session_id": self.session_id,
+            "treatment": self.treatment_id,
+        })
+        if snapshot.method_runtime_binding_digest != expected_binding:
+            raise ValueError("SEM snapshot method binding mismatch")
         if hashlib.sha256(snapshot.opaque_payload).hexdigest() != snapshot.payload_sha256:
             raise ValueError("SEM snapshot checksum mismatch")
         data = json.loads(snapshot.opaque_payload.decode("utf-8"))
@@ -811,6 +849,31 @@ class SEMMethodSession:
             )
             for row in data.get("demands", [])
         ]
+        self._candidates = []
+        for row in data.get("candidates", []):
+            demand_row = row["demand"]
+            demand = StructuralDemand(
+                str(demand_row["demand_id"]), str(demand_row["task_id"]),
+                str(demand_row["family"]), str(demand_row["signal"]),
+                str(demand_row["operation"]), tuple(demand_row["evidence_ids"]),
+                tuple(demand_row["target_ids"]), str(demand_row["digest"]),
+            )
+            edits = tuple(
+                SemanticEdit(
+                    str(edit_row["edit_id"]), str(edit_row["operation"]),
+                    str(edit_row["target_id"]), dict(edit_row["payload"]),
+                    str(edit_row["rationale"]), str(edit_row["digest"]),
+                )
+                for edit_row in row.get("edits", [])
+            )
+            self._candidates.append(
+                EvolutionCandidate(
+                    str(row["candidate_id"]), demand, edits,
+                    str(row["status"]), str(row["reason"]),
+                    str(row["base_graph_digest"]),
+                    tuple(row["backfill_ids"]), str(row["digest"]),
+                )
+            )
         self._evolution_events = list(data.get("evolution_events", []))
         self._candidate_count = int(data.get("candidate_count", 0))
         self._adopted_count = int(data.get("adopted_count", 0))
