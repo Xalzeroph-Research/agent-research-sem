@@ -27,6 +27,8 @@ CORE6_VARIANTS = (
 SEM_METRICS = (
     "success_rate", "utility_mean", "steps_total", "duration_s_total",
     "memory_queries_total", "task_failed_total", "task_blocked_total",
+    "task_precondition_failed_total", "task_partial_total", "task_no_threats_total",
+    "verified_actions_total", "evidence_closed_total",
 )
 MANIFEST_PATH = Path(__file__).with_name("manifests") / "sem_primary_tasks_v1.json"
 

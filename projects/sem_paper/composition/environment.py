@@ -35,6 +35,10 @@ class EnvironmentTaskResult:
     memory_queries: int
     blocked: bool
     evidence_digest: str
+    failure_class: str = ""
+    verified_actions: int = 0
+    evidence_closed: bool = False
+    outcome_codes: tuple[str, ...] = ()
 
 
 class _ScriptedMinecraftSession:
@@ -337,9 +341,14 @@ class RealMinecraftEnvironment:
         variant_id: str,
         seed: str,
     ) -> tuple[EnvironmentTaskResult, ...]:
-        bridge = _MinecraftBridgeClient(
-            run_identity=session.session_id.replace(":", "-")
+        self._reset_assignment_world(session.session_id)
+        run_identity = session.session_id.replace(":", "-")
+        recovery_root = os.environ.get(
+            "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
         )
+        recovery_dir = os.path.join(recovery_root, run_identity)
+        bridge = _MinecraftBridgeClient(run_identity=run_identity)
+        bridge.recovery_dir = recovery_dir
         bridge.start()
         results: list[EnvironmentTaskResult] = []
         try:
@@ -347,21 +356,20 @@ class RealMinecraftEnvironment:
                 task_id = str(task["task_id"])
                 started = time.monotonic()
                 before = session.recall(RecallRequest(str(task["goal"]), None, limit=4))
+                plan = session.plan_actions(task)
                 task_results = self._run_real_task(
-                    bridge, task, task_id, str(task["lineage_id"])
+                    bridge, task, task_id, str(task["lineage_id"]), plan
                 )
-                success = bool(task_results) and all(
-                    bool(item.get("verified")) for item in task_results
-                )
+                success, failure_class = self._validate_task(task, task_results)
                 steps = len(task_results)
                 outcome = MethodTaskOutcome(
                     task_id=task_id,
                     family=str(task["family"]),
                     lineage_id=str(task["lineage_id"]),
                     success=success,
-                    utility=(1.0 if success else -0.25) + len(before.artifacts) * 0.01,
+                    utility=1.0 if success else -0.25,
                     steps=steps,
-                    failure_reason="" if success else "real provider action not verified",
+                    failure_reason="" if success else failure_class,
                     memory_queries=1,
                 )
                 session.ingest(
@@ -383,7 +391,7 @@ class RealMinecraftEnvironment:
                         steps,
                         time.monotonic() - started,
                         1,
-                        not success,
+                        failure_class in {"precondition_missing", "provider_rejected"},
                         canonical_digest(
                             {
                                 "task_id": task_id,
@@ -391,11 +399,75 @@ class RealMinecraftEnvironment:
                                 "generation": session.generation,
                             }
                         ),
+                        failure_class=failure_class,
+                        verified_actions=sum(
+                            bool(item.get("verified")) for item in task_results
+                        ),
+                        evidence_closed=bool(task_results) and all(
+                            isinstance(item.get("outcome"), Mapping)
+                            for item in task_results
+                        ),
+                        outcome_codes=tuple(
+                            str(item.get("outcome", {}).get("code", ""))
+                            for item in task_results
+                            if isinstance(item.get("outcome"), Mapping)
+                        ),
                     )
                 )
             return tuple(results)
         finally:
             bridge.close()
+
+    def _reset_assignment_world(self, session_id: str) -> None:
+        command = os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
+        required = os.environ.get("MC_REQUIRE_WORLD_RESET", "0") == "1"
+        if not command:
+            if required:
+                raise RuntimeError(
+                    "confirmatory Minecraft run requires MC_ASSIGNMENT_RESET_COMMAND"
+                )
+            return
+        rendered = command.format(
+            session_id=session_id.replace(":", "-"),
+            assignment_id=session_id.replace(":", "-"),
+        )
+        completed = subprocess.run(
+            rendered, shell=True, text=True, capture_output=True, timeout=300
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "Minecraft assignment world reset failed: "
+                + (completed.stderr or completed.stdout)[-1000:]
+            )
+
+    @staticmethod
+    def _validate_task(
+        task: Mapping[str, Any], actions: list[dict[str, Any]]
+    ) -> tuple[bool, str]:
+        if not actions:
+            return False, "provider_error"
+        outcomes = [
+            item.get("outcome", {})
+            for item in actions
+            if isinstance(item.get("outcome"), Mapping)
+        ]
+        codes = {str(outcome.get("code", "")) for outcome in outcomes}
+        if "ACTION_HANDLER_BOUNDED_FAILURE" in codes:
+            return False, "timeout"
+        if codes & {"NO_RECIPE_OR_CRAFTING_TABLE", "ITEM_NOT_AVAILABLE",
+                    "HARVEST_TOOL_REQUIRED", "BLOCK_NOT_FOUND"}:
+            return False, "precondition_missing"
+        if "PATH_INTERRUPTED" in codes:
+            return False, "path_interrupted"
+        family = str(task.get("family", ""))
+        verified = [item for item in actions if bool(item.get("verified"))]
+        if family == "combat_survival" and "NO_THREATS" in codes:
+            return False, "no_threats"
+        if family == "navigation_return" and "PATH_INTERRUPTED" in codes:
+            return False, "path_interrupted"
+        if len(verified) != len(actions):
+            return False, "partial_effect"
+        return True, ""
 
     def _run_real_task(
         self,
@@ -403,32 +475,33 @@ class RealMinecraftEnvironment:
         task: Mapping[str, Any],
         task_id: str,
         task_lineage: str,
+        plan: tuple[tuple[str, Mapping[str, Any], float], ...],
     ) -> list[dict[str, Any]]:
         family = str(task["family"])
-        actions: list[tuple[str, dict[str, Any], float]] = []
-        if family == "resource_collection":
+        actions: list[tuple[str, dict[str, Any], float]] = list(plan)
+        if not actions and family == "resource_collection":
             actions = [("collect_block", {"block": "oak_log", "count": 4, "max_distance": 64}, 240.0)]
-        elif family == "crafting_tech_tree":
+        elif not actions and family == "crafting_tech_tree":
             actions = [
                 ("craft_item", {"item": "oak_planks", "count": 16}, 60.0),
                 ("collect_block", {"block": "cobblestone", "count": 3, "max_distance": 32}, 180.0),
                 ("craft_item", {"item": "stone_pickaxe", "count": 1}, 90.0),
             ]
-        elif family == "navigation_return":
+        elif not actions and family == "navigation_return":
             actions = [
                 ("move_away", {"distance": 16}, 120.0),
                 ("goto", {"position": {"x": 9.5, "y": 72, "z": 168.5}, "radius": 5}, 180.0),
             ]
-        elif family == "combat_survival":
+        elif not actions and family == "combat_survival":
             actions = [("defend_self", {"radius": 32, "max_targets": 1, "max_hits": 8}, 180.0)]
-        elif family == "simple_building":
+        elif not actions and family == "simple_building":
             actions = [
                 ("craft_item", {"item": "crafting_table", "count": 1}, 90.0),
                 ("craft_item", {"item": "chest", "count": 1}, 90.0),
                 ("place_block", {"item": "crafting_table"}, 90.0),
                 ("place_block", {"item": "chest"}, 90.0),
             ]
-        elif family == "long_horizon_mixed":
+        elif not actions and family == "long_horizon_mixed":
             actions = [
                 ("collect_block", {"block": "iron_ore", "count": 1, "max_distance": 64}, 240.0),
                 ("craft_item", {"item": "shield", "count": 1}, 120.0),

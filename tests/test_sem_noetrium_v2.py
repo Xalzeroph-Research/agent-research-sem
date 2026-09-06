@@ -14,6 +14,7 @@ from projects.sem_paper.method.self_evolving_memory import (
     SEMMethodSession,
     SemMethodAgentMemoryAdapter,
 )
+from projects.sem_paper.benchmarks import JsonTaskBenchmarkAdapter
 
 
 def test_manifest_uses_new_project_contract() -> None:
@@ -51,6 +52,16 @@ def test_method_evolves_and_restores() -> None:
     assert restored.diagnostics()["entry_count"] == method.diagnostics()["entry_count"]
 
 
+def test_method_owns_real_action_plan() -> None:
+    method = SEMMethodSession(
+        session_id="plan", treatment_id="fixed_memory",
+        seed="Seed-C", adaptive=False,
+    )
+    plan = method.plan_actions({"family": "combat_survival"})
+    assert plan[0][0] == "defend_self"
+    assert plan[0][1]["max_targets"] == 1
+
+
 def test_agent_memory_adapter_keeps_method_generation() -> None:
     method = SEMMethodSession(
         session_id="agent", treatment_id="fixed_memory",
@@ -58,6 +69,17 @@ def test_agent_memory_adapter_keeps_method_generation() -> None:
     )
     adapter = SemMethodAgentMemoryAdapter(method)
     assert adapter.session is method
+
+
+def test_external_benchmark_metadata_adapter(tmp_path) -> None:
+    source = tmp_path / "tasks.json"
+    source.write_text(
+        '{"tasks":[{"task_id":"m1","goal":"remember this","family":"memory"}]}',
+        encoding="utf-8",
+    )
+    benchmark = JsonTaskBenchmarkAdapter("memory-agent-bench").build(source)
+    assert benchmark.benchmark_id == "memory-agent-bench"
+    assert benchmark.tasks[0].task_id == "m1"
 
 
 def test_scripted_environment_is_recoverable() -> None:

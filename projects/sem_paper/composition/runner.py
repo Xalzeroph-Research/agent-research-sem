@@ -78,6 +78,11 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 ("memory_queries_total", float(sum(item.memory_queries for item in results))),
                 ("task_failed_total", float(count - success_count)),
                 ("task_blocked_total", float(sum(item.blocked for item in results))),
+                ("task_precondition_failed_total", float(sum(item.failure_class == "precondition_missing" for item in results))),
+                ("task_partial_total", float(sum(item.failure_class in {"partial_effect", "path_interrupted"} for item in results))),
+                ("task_no_threats_total", float(sum(item.failure_class == "no_threats" for item in results))),
+                ("verified_actions_total", float(sum(item.verified_actions for item in results))),
+                ("evidence_closed_total", float(sum(item.evidence_closed for item in results))),
             ),
         )
 

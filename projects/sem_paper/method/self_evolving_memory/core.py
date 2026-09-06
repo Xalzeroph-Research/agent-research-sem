@@ -177,6 +177,38 @@ class SEMMethodSession:
         context_text = "\n".join(entry.text for entry in ranked)
         return RecallResult(context_text, self.generation, tuple(entry.digest for entry in ranked))
 
+    def plan_actions(self, task: Mapping[str, Any]) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
+        """Return the method-owned action plan consumed by an environment adapter.
+
+        The environment executes and verifies these intents; it does not invent a
+        second hidden policy. The plan is deliberately deterministic and auditable.
+        """
+        family = str(task.get("family", ""))
+        plans = {
+            "resource_collection": (("collect_block", {"block": "oak_log", "count": 4, "max_distance": 64}, 240.0),),
+            "crafting_tech_tree": (
+                ("craft_item", {"item": "oak_planks", "count": 16}, 60.0),
+                ("collect_block", {"block": "cobblestone", "count": 3, "max_distance": 32}, 180.0),
+                ("craft_item", {"item": "stone_pickaxe", "count": 1}, 90.0),
+            ),
+            "navigation_return": (
+                ("move_away", {"distance": 16}, 120.0),
+                ("goto", {"position": {"x": 9.5, "y": 72, "z": 168.5}, "radius": 5}, 180.0),
+            ),
+            "combat_survival": (("defend_self", {"radius": 32, "max_targets": 1, "max_hits": 8}, 180.0),),
+            "simple_building": (
+                ("craft_item", {"item": "crafting_table", "count": 1}, 90.0),
+                ("craft_item", {"item": "chest", "count": 1}, 90.0),
+                ("place_block", {"item": "crafting_table"}, 90.0),
+                ("place_block", {"item": "chest"}, 90.0),
+            ),
+            "long_horizon_mixed": (
+                ("collect_block", {"block": "iron_ore", "count": 1, "max_distance": 64}, 240.0),
+                ("craft_item", {"item": "shield", "count": 1}, 120.0),
+            ),
+        }
+        return tuple(plans.get(family, ()))
+
     def task_completion_key(self, context: object) -> str:
         return canonical_digest({"session": self.session_id, "context": str(context)})
 

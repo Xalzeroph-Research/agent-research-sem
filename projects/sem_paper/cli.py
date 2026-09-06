@@ -55,8 +55,14 @@ def main(argv: list[str] | None = None) -> int:
                  "count": row.count, "mean": row.mean}
                 for row in report.aggregates
             ],
-            "claim_status": "exploratory_real_matrix",
-            "world_reset_per_assignment": False,
+            "claim_status": (
+                "exploratory_real_matrix"
+                if not __import__("os").environ.get("MC_REQUIRE_WORLD_RESET") == "1"
+                else "confirmatory_real_matrix"
+            ),
+            "world_reset_per_assignment": bool(
+                __import__("os").environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
+            ),
         }
     elif args.command == "real-pilot":
         plan, observation = run_real_pilot()
