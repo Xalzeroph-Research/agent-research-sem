@@ -65,6 +65,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 session=session,
                 variant_id=assignment.variant_id,
                 seed=assignment.seed,
+                assignment=assignment,
             )
         finally:
             session.close()

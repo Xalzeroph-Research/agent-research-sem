@@ -112,6 +112,7 @@ class ScriptedMinecraftEnvironment:
         session: SEMMethodSession,
         variant_id: str,
         seed: str,
+        assignment: object | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
         results = []
         environment_session = self.open_session(
@@ -351,6 +352,7 @@ class RealMinecraftEnvironment:
         session: SEMMethodSession,
         variant_id: str,
         seed: str,
+        assignment: object | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
         self._reset_assignment_world(session.session_id)
         run_identity = (
