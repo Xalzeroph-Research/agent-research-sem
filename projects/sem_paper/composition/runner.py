@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from noetrium.contracts import (
     BasicStudyMetricAggregator,
+    EnvironmentAssignmentIdentity,
+    EnvironmentAssignmentIsolationPort,
+    EnvironmentAssignmentIsolationReceipt,
     BoundStudyUnitExecutionPort,
     ExperimentPlan,
     StudyExecutionUnit,
@@ -27,6 +31,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
 
     plan: ExperimentPlan
     environment: object
+    assignment_isolation_factory: Callable[[EnvironmentAssignmentIdentity, object, VariantBinding], EnvironmentAssignmentIsolationPort] | None = None
 
     def run(self, assignments=None) -> StudyMatrixExecutionReport:
         executor = StudyMatrixExecutor(BasicStudyMetricAggregator())
@@ -60,14 +65,31 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             adaptive=treatment != "fixed_memory",
             initial_memory=(f"seed={assignment.seed}",),
         )
+        isolation = None
+        isolation_receipt: EnvironmentAssignmentIsolationReceipt | None = None
+        if self.assignment_isolation_factory is not None:
+            identity = EnvironmentAssignmentIdentity(
+                assignment_id=assignment.assignment_digest,
+                study_id=assignment.study_id,
+                plan_digest=self.plan.plan_digest,
+                variant_id=assignment.variant_id,
+                repetition=assignment.repetition,
+                seed=assignment.seed,
+                environment_id=str(getattr(self.environment, "environment_id", "unknown")),
+            )
+            isolation = self.assignment_isolation_factory(identity, assignment, binding)
+            isolation_receipt = isolation.prepare_assignment(identity)
         try:
             results = self.environment.run_suite(
                 session=session,
                 variant_id=assignment.variant_id,
                 seed=assignment.seed,
                 assignment=assignment,
+                assignment_isolation=isolation,
             )
         finally:
+            if isolation is not None and isolation_receipt is not None:
+                isolation.finalize_assignment(identity, isolation_receipt)
             session.close()
         count = len(results)
         success_count = sum(item.success for item in results)

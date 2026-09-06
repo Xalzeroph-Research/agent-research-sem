@@ -113,6 +113,7 @@ class ScriptedMinecraftEnvironment:
         variant_id: str,
         seed: str,
         assignment: object | None = None,
+        assignment_isolation: object | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
         results = []
         environment_session = self.open_session(
@@ -353,8 +354,10 @@ class RealMinecraftEnvironment:
         variant_id: str,
         seed: str,
         assignment: object | None = None,
+        assignment_isolation: object | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
-        self._reset_assignment_world(session.session_id)
+        if assignment_isolation is None:
+            self._reset_assignment_world(session.session_id)
         run_identity = (
             f"{self.execution_run_id}-{session.session_id.replace(':', '-')}"
         )
