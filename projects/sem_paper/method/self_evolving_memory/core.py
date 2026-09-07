@@ -264,6 +264,8 @@ class SEMMethodSession:
             source=source,
             generation=self.generation,
         )
+        if self.treatment_id == "no_memory":
+            return event
         if event.evidence_id not in {item.evidence_id for item in self._evidence}:
             self._evidence.append(event)
             self._append_entry(payload, source)
@@ -885,6 +887,7 @@ class SEMMethodSession:
             "session_id": self.session_id,
             "treatment_id": self.treatment_id,
             "generation": self.generation,
+            "architecture_generation": self._adopted_count,
             "graph_digest": graph["graph_digest"],
             "node_count": graph["node_count"],
             "active_node_count": graph["active_node_count"],

@@ -144,7 +144,7 @@ def run_stream(stream: TaskStream, *, treatment_id: str, session_id: str | None 
     )
     traces: list[StreamTrace] = []
     for episode in stream.episodes:
-        generation_before = session.generation
+        generation_before = f"g{session.diagnostics()['adopted_count']}"
         before = session.recall(RecallRequest(episode.query, None, limit=8))
         success = (
             all(key in before.context_text for key in episode.required_memory)
@@ -163,7 +163,7 @@ def run_stream(stream: TaskStream, *, treatment_id: str, session_id: str | None 
         diagnostics = session.diagnostics()
         traces.append(StreamTrace(
             episode.episode_id, episode.ordinal, success, before.artifacts,
-            generation_before, str(diagnostics["generation"]),
+            generation_before, f"g{diagnostics['adopted_count']}",
             outcome.utility, success, int(diagnostics["candidate_count"]),
         ))
     successes = [float(trace.success) for trace in traces]
@@ -181,7 +181,7 @@ def run_stream(stream: TaskStream, *, treatment_id: str, session_id: str | None 
         sum(float(trace.verified_effect) for trace in traces) / max(1, len(traces)),
         int(diagnostics["candidate_count"]), int(diagnostics["adopted_count"]),
         int(diagnostics["rejected_count"]),
-        int(str(diagnostics["generation"])[1:]),
+        int(diagnostics["adopted_count"]),
         tuple(traces),
     )
 

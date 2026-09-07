@@ -101,8 +101,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         if count == 0:
             raise RuntimeError("SEM environment returned no task results")
         success_count = sum(item.success for item in results)
-        generation = str(diagnostics.get("generation", "g0"))
-        generation_number = int(generation[1:]) if generation.startswith("g") else 0
+        generation_number = int(diagnostics.get("architecture_generation", 0))
         metrics = (
             ("success_rate", success_count / count),
             ("utility_mean", sum(item.utility for item in results) / count),
