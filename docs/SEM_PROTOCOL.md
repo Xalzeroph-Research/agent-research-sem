@@ -113,3 +113,13 @@ SEM_IMPLEMENTATION_ALIGNMENT.md are normative for the current SEM branch:
 - Minecraft action planning belongs to the agent/environment adapter.
 - SEM imports generic graph contracts through the generated Noetrium facade.
 - EvoBench is diagnostic only; Minecraft claims require the real protocol.
+
+
+### 6.1 Evidence-channel and monitor closure
+
+The implementation maintains separate J_mem and J_audit channels. Audit
+records are checkpointed for reproducibility but are never returned by
+recall, attached to Typed Memory DAG nodes, or used as candidate backfill
+evidence. The architecture-independent monitor records structural symptoms
+and query outcomes only; it does not select an edit or enforce utility-based
+online adoption.

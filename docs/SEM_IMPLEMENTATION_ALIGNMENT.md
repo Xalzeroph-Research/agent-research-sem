@@ -59,6 +59,21 @@ transfer, recovery, adaptation, cost, and negative transfer are measured by a
 disjoint proposal-blind held-out audit. Audit evidence belongs to J_audit and
 must never be materialized into J_mem.
 
+
+## 3A. Evidence and monitor implementation
+
+The current method plane now keeps J_mem and J_audit in a separate
+EvidenceJournal. record_audit persists held-out audit evidence without
+routing it into recall, node evidence, candidate backfill, or semantic
+materialization.
+
+ArchitectureIndependentMonitor records failure support, exposure, evidence
+references, and recall hit statistics without emitting an edit operation or a
+target node. Its state is included in the method checkpoint and restored
+before forward execution resumes. These signals are diagnostic inputs to the
+proposal boundary; they are not acceptance decisions and do not contain
+held-out utility labels.
+
 ## 4. Noetrium integration rule
 
 SEM imports generic graph types through the generated public Noetrium
