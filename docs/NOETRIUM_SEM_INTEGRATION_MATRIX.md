@@ -25,7 +25,7 @@ contract is absent, the issue is upstream and must be fixed in Noetrium first.
 | Noetrium capability | Public surface | Current SEM state | Next change |
 | --- | --- | --- | --- |
 | Method identity/session/recall/outcome | participant/method | Used by SEMMethodSession | Keep the method ABI; bind runtime services explicitly |
-| Agent cognition memory seam | participant/agent / AgentMemoryPort | Adapter existed but lacked checkpoint/restore and was not wired into environment calls | Use SemMethodAgentMemoryAdapter for all memory treatments except no_memory |
+| Agent cognition memory seam | participant/agent / AgentMemoryPort | Adapter now implements checkpoint/restore and is wired into environment calls | Use SemMethodAgentMemoryAdapter for all memory treatments except no_memory |
 | Typed memory graph substrate | components / noetrium.contracts.systems.components | Used through the public facade | Populate typed node metadata; keep semantic policy in SEM |
 | Typed node metadata | MemoryNodeRecord fields purpose/scope/mode/schema/access/sources/transform/maintenance_contract/provenance | Upstream public contract now available in af9ec480 | SEM constructors and edit materialization must preserve every field |
 | Environment and Minecraft | environment/*, especially environment/minecraft | Generic action/observation types are used; real bridge still owns a local subprocess adapter | Move lifecycle, world cut/branch, readiness, and effect receipts behind the Noetrium environment seams |
@@ -60,7 +60,7 @@ Therefore:
 ## Ordered SEM migration
 
 1. Completed: public graph facade and typed node metadata.
-2. In progress: AgentMemoryPort adapter wiring and semantic metadata preservation.
+2. Completed: AgentMemoryPort adapter wiring and semantic metadata preservation.
 3. Next: Noetrium run/checkpoint composition for method + environment + assignment.
 4. Next: typed Minecraft environment/effect/recovery integration.
 5. Next: typed model request/serving integration.

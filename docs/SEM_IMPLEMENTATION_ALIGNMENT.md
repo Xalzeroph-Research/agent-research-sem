@@ -3,7 +3,8 @@
 Date: 2026-09-07
 
 This document freezes the implementation boundary between the SEM method and
-the Noetrium platform. The latest method drafts define the scientific method;
+the Noetrium platform. The detailed capability review is in
+docs/NOETRIUM_SEM_INTEGRATION_MATRIX.md. The latest method drafts define the scientific method;
 the current branch code is an implementation of that definition and must not
 redefine it.
 
