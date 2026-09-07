@@ -18,15 +18,13 @@ from noetrium.contracts import (
     canonical_bytes,
     canonical_digest,
 )
-from noetrium_platform.capabilities.participant.agent.api.memory_graph import (
+from components.reference.single_agent.memory import (
     MemoryEdgeRecord,
+    MemoryGraphConflict,
     MemoryGraphLedgerEntry,
     MemoryGraphOperation,
     MemoryGraphSnapshot,
     MemoryNodeRecord,
-)
-from noetrium_platform.capabilities.participant.agent.runtime.memory_graph import (
-    MemoryGraphConflict,
     VersionedMemoryGraph,
 )
 
