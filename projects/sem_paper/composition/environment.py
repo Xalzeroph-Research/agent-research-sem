@@ -28,6 +28,32 @@ from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
 from projects.sem_paper.composition.model_planner import ModelActionPlanner
 
 
+def load_scripted_action_plan(
+    task: Mapping[str, Any],
+) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
+    # Parse an externally supplied fixture plan in the environment adapter.
+    # SEM only receives verified outcomes; action vocabulary stays outside it.
+    rows = task.get("action_plan", ())
+    if not isinstance(rows, (tuple, list)):
+        return ()
+    plan: list[tuple[str, Mapping[str, Any], float]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        action_type = str(row.get("action_type", "")).strip()
+        if not action_type:
+            continue
+        arguments = row.get("arguments", {})
+        if not isinstance(arguments, Mapping):
+            continue
+        plan.append((
+            action_type,
+            dict(arguments),
+            float(row.get("timeout_s", 90.0)),
+        ))
+    return tuple(plan)
+
+
 @dataclass(frozen=True, slots=True)
 class EnvironmentTaskResult:
     task_id: str
@@ -407,7 +433,7 @@ class RealMinecraftEnvironment:
                             f"model planner returned an empty plan for task {task_id}"
                         )
                 else:
-                    plan = session.plan_actions(task)
+                    plan = load_scripted_action_plan(task)
                 task_results = self._run_real_task(
                     bridge, task, task_id,
                     str(task.get("lineage_id", canonical_digest(task))), plan

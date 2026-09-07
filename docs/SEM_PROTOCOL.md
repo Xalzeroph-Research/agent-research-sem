@@ -99,3 +99,17 @@ model planner、每 assignment world reset、verified action receipt、
 evidence closure 和完整 repetition 矩阵都通过，结果才可进入 claim-ready
 表格。若 world reset 未配置，CLI 必须标记 exploratory，不能称为严格
 confirmatory。
+
+
+## Implementation alignment
+
+The implementation decisions in
+SEM_IMPLEMENTATION_ALIGNMENT.md are normative for the current SEM branch:
+
+- fixed_typed is persistent but non-evolving; no_memory is the
+  non-persistent condition.
+- Runtime adoption is proposal-blind and does not require an immediate
+  positive task utility delta.
+- Minecraft action planning belongs to the agent/environment adapter.
+- SEM imports generic graph contracts through the generated Noetrium facade.
+- EvoBench is diagnostic only; Minecraft claims require the real protocol.

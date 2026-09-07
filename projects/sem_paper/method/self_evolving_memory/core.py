@@ -18,7 +18,7 @@ from noetrium.contracts import (
     canonical_bytes,
     canonical_digest,
 )
-from components.reference.single_agent.memory import (
+from noetrium.contracts.systems.components import (
     MemoryEdgeRecord,
     MemoryGraphConflict,
     MemoryGraphLedgerEntry,
@@ -27,6 +27,8 @@ from components.reference.single_agent.memory import (
     MemoryNodeRecord,
     VersionedMemoryGraph,
 )
+
+from .gate import ProposalBlindGate
 
 
 SEM_TREATMENTS = frozenset({"no_memory", "flat_episodic", "fixed_typed", "sem"})
@@ -177,6 +179,7 @@ class SEMMethodSession:
         self._rejected_count = 0
         self._backfilled_count = 0
         self._mismatch_count = 0
+        self._gate = ProposalBlindGate()
         self._graph = VersionedMemoryGraph(self._initial_snapshot(treatment_id))
         for text in initial_memory:
             self.ingest({"text": text, "source": "initial"}, None)
@@ -350,21 +353,6 @@ class SEMMethodSession:
             self.generation,
             tuple(item.evidence_id for item in chosen),
         )
-
-    def plan_actions(self, task: Mapping[str, Any]) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
-        """Return only an externally supplied plan; SEM does not own Minecraft policy."""
-        rows = task.get("action_plan", ())
-        if not isinstance(rows, (tuple, list)):
-            return ()
-        plan: list[tuple[str, Mapping[str, Any], float]] = []
-        for row in rows:
-            if not isinstance(row, Mapping):
-                continue
-            action_type = str(row.get("action_type", "")).strip()
-            if not action_type:
-                continue
-            plan.append((action_type, dict(row.get("arguments", {})), float(row.get("timeout_s", 90.0))))
-        return tuple(plan)
 
     def task_completion_key(self, context: object) -> str:
         if isinstance(context, Mapping) and context.get("task_id"):
@@ -624,8 +612,22 @@ class SEMMethodSession:
         raise ValueError(f"unsupported SEM edit operation: {edit.operation}")
 
     def _apply_candidate(self, candidate: EvolutionCandidate) -> bool:
-        if not candidate.edits:
+        gate = self._gate.evaluate(
+            base_graph_digest=candidate.base_graph_digest,
+            current_graph_digest=self._graph.snapshot().digest(),
+            edits=candidate.edits,
+            evidence_ids=candidate.backfill_ids,
+            known_evidence_ids={event.evidence_id for event in self._evidence},
+        )
+        if not gate.accepted:
             self._rejected_count += 1
+            self._evolution_events.append({
+                "event": "candidate_rejected",
+                "candidate_id": candidate.candidate_id,
+                "reason": gate.reason,
+                "gate_checks": list(gate.checks),
+                "online_utility_gate": False,
+            })
             return False
         try:
             transaction = self._graph.stage(
@@ -902,6 +904,8 @@ class SEMMethodSession:
             "rejected_count": self._rejected_count,
             "historical_backfill_count": self._backfilled_count,
             "evolution_event_count": len(self._evolution_events),
+            "proposal_blind_gate": True,
+            "online_utility_gate": False,
             "adaptive": self.adaptive,
             "closed": self._closed,
         }

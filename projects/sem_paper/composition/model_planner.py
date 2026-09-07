@@ -114,20 +114,43 @@ class ModelActionPlanner:
         for row in rows:
             if not isinstance(row, Mapping):
                 raise ValueError("model planner action must be an object")
-            action_type = str(
-                row.get("action_type", row.get("type", row.get("action", "")))
-            ).strip()
+            action_value = row.get("action_type", row.get("type", row.get("action", "")))
+            nested_action = dict(action_value) if isinstance(action_value, Mapping) else None
+            if nested_action is not None:
+                action_type = str(
+                    nested_action.get(
+                        "action_type",
+                        nested_action.get("type", nested_action.get("tool", nested_action.get("action", "")))
+                    )
+                ).strip()
+            else:
+                action_type = str(action_value).strip()
             if action_type not in ALLOWED_ACTIONS and action_type in {"position", "move"}:
                 if any(key in row for key in ("target", "target_position", "position")):
                     action_type = "goto"
             if action_type not in ALLOWED_ACTIONS:
                 raise ValueError(f"model planner emitted unsupported action: {action_type}")
             arguments = row.get("arguments")
+            if arguments is None and nested_action is not None:
+                arguments = {
+                    key: value for key, value in nested_action.items()
+                    if key not in {"action_type", "type", "tool", "reason", "timeout_s"}
+                }
             if arguments is None:
                 arguments = {
                     key: value for key, value in row.items()
                     if key not in {"action_type", "type", "action", "reason", "timeout_s"}
                 }
+                if "target_position" in arguments and "position" not in arguments:
+                    arguments["position"] = arguments.pop("target_position")
+                if action_type == "goto" and "target" in arguments and "position" not in arguments:
+                    arguments["position"] = arguments.pop("target")
+                if "block_type" in arguments and "block" not in arguments:
+                    arguments["block"] = arguments.pop("block_type")
+                if action_type == "collect_block" and "count" not in arguments:
+                    arguments["count"] = 1
+            if isinstance(arguments, Mapping):
+                arguments = dict(arguments)
                 if "target_position" in arguments and "position" not in arguments:
                     arguments["position"] = arguments.pop("target_position")
                 if action_type == "goto" and "target" in arguments and "position" not in arguments:

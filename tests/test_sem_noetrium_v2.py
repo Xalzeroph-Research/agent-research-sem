@@ -143,9 +143,12 @@ def test_no_memory_has_no_recall_surface() -> None:
 
 
 def test_method_does_not_own_minecraft_action_plans() -> None:
+    from projects.sem_paper.composition.environment import load_scripted_action_plan
+
     session = SEMMethodSession(session_id="plan", treatment_id="sem", seed="run")
-    assert session.plan_actions({"family": "combat_survival"}) == ()
-    assert session.plan_actions(
+    assert not hasattr(session, "plan_actions")
+    assert load_scripted_action_plan({"family": "combat_survival"}) == ()
+    assert load_scripted_action_plan(
         {
             "action_plan": [
                 {
@@ -163,3 +166,37 @@ def test_agent_adapter_keeps_session_boundary() -> None:
     adapter = SemMethodAgentMemoryAdapter(session)
     assert adapter.session is session
     assert adapter.diagnostics()["treatment_id"] == "sem"
+
+
+def test_fixed_typed_persists_without_architecture_evolution() -> None:
+    session = SEMMethodSession(
+        session_id="fixed-persistent",
+        treatment_id="fixed_typed",
+        seed="run",
+    )
+    session.ingest(
+        {"task_id": "prior", "family": "resource", "state": {"inventory": ["oak_log"]}},
+        None,
+    )
+    session.task_completed(_failure("failed", "precondition_missing"), {"task_id": "failed"})
+    diagnostics = session.diagnostics()
+    assert diagnostics["evidence_count"] >= 2
+    assert diagnostics["memory_entry_count"] >= 2
+    assert diagnostics["adopted_count"] == 0
+    assert session.recall(RecallRequest("oak_log", None)).artifacts
+
+
+def test_sem_runtime_adoption_is_proposal_blind() -> None:
+    session = SEMMethodSession(session_id="gate", treatment_id="sem", seed="run")
+    session.task_completed(_failure("failed", "precondition_missing"), {"task_id": "failed"})
+    diagnostics = session.diagnostics()
+    assert diagnostics["proposal_blind_gate"] is True
+    assert diagnostics["online_utility_gate"] is False
+    assert diagnostics["adopted_count"] == 1
+
+
+def test_sem_uses_public_noetrium_memory_graph_facade() -> None:
+    from noetrium.contracts.systems.components import VersionedMemoryGraph
+
+    session = SEMMethodSession(session_id="public-contract", treatment_id="sem", seed="run")
+    assert isinstance(session._graph, VersionedMemoryGraph)

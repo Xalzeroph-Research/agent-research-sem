@@ -10,6 +10,8 @@ from .self_evolving_memory import (
     SemanticEdit,
     StructuralDemand,
     SemMethodAgentMemoryAdapter,
+    ProposalBlindGate,
+    ProposalBlindGateDecision,
 )
 
 __all__ = [
