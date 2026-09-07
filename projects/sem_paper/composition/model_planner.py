@@ -54,6 +54,7 @@ class ModelActionPlanner:
             "model": self.config.model,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
                 {"role": "system", "content": (
                     "Return only valid JSON. You are a bounded Minecraft action "
@@ -74,7 +75,11 @@ class ModelActionPlanner:
         self.prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
         self.completion_tokens += int(usage.get("completion_tokens", 0) or 0)
         content = result["choices"][0]["message"]["content"]
-        return self._parse_actions(content, int(task.get("max_steps", 12)))
+        try:
+            return self._parse_actions(content, int(task.get("max_steps", 12)))
+        except ValueError as exc:
+            excerpt = str(content).replace("\\n", " ")[-1200:]
+            raise ValueError(f"{exc}; raw_model_output={excerpt}") from exc
 
     @staticmethod
     def _prompt(task: Mapping[str, Any], memory_context: str, snapshot: Mapping[str, Any]) -> str:
@@ -109,10 +114,28 @@ class ModelActionPlanner:
         for row in rows:
             if not isinstance(row, Mapping):
                 raise ValueError("model planner action must be an object")
-            action_type = str(row.get("action_type", "")).strip()
+            action_type = str(
+                row.get("action_type", row.get("type", row.get("action", "")))
+            ).strip()
+            if action_type not in ALLOWED_ACTIONS and action_type in {"position", "move"}:
+                if any(key in row for key in ("target", "target_position", "position")):
+                    action_type = "goto"
             if action_type not in ALLOWED_ACTIONS:
                 raise ValueError(f"model planner emitted unsupported action: {action_type}")
-            arguments = row.get("arguments", {})
+            arguments = row.get("arguments")
+            if arguments is None:
+                arguments = {
+                    key: value for key, value in row.items()
+                    if key not in {"action_type", "type", "action", "reason", "timeout_s"}
+                }
+                if "target_position" in arguments and "position" not in arguments:
+                    arguments["position"] = arguments.pop("target_position")
+                if action_type == "goto" and "target" in arguments and "position" not in arguments:
+                    arguments["position"] = arguments.pop("target")
+                if "block_type" in arguments and "block" not in arguments:
+                    arguments["block"] = arguments.pop("block_type")
+                if action_type == "collect_block" and "count" not in arguments:
+                    arguments["count"] = 1
             if not isinstance(arguments, Mapping):
                 raise ValueError("model planner action arguments must be an object")
             timeout_s = float(row.get("timeout_s", 90.0))
