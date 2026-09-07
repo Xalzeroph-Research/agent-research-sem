@@ -6,31 +6,34 @@ from typing import Any
 
 from noetrium.contracts import (
     BenchmarkTaskSet,
+    DeterministicStudyAssignment,
     ExperimentPlan,
-    StudyVariantSpec,
     StudyProtocol,
+    StudyVariantSpec,
     TaskDefinition,
     VariantBinding,
     VariantKind,
     canonical_digest,
 )
-from noetrium.contracts import DeterministicStudyAssignment
 
-CORE6_VARIANTS = (
-    ("fixed-c", VariantKind.CONTROL, "fixed_memory", "Seed-C"),
-    ("rule-c", VariantKind.TREATMENT, "rule_based", "Seed-C"),
-    ("self-c", VariantKind.TREATMENT, "self_evolving", "Seed-C"),
-    ("fixed-x", VariantKind.CONTROL, "fixed_memory", "Seed-X"),
-    ("rule-x", VariantKind.TREATMENT, "rule_based", "Seed-X"),
-    ("self-x", VariantKind.TREATMENT, "self_evolving", "Seed-X"),
+TREATMENT_IDS = ("no_memory", "flat_episodic", "fixed_typed", "sem")
+PRIMARY_METRICS = (
+    "success_rate",
+    "utility_mean",
+    "steps_total",
+    "duration_s_total",
+    "memory_queries_total",
+    "memory_entries_total",
+    "active_node_count",
+    "architecture_generation",
+    "candidate_count",
+    "adopted_count",
+    "rejected_count",
+    "historical_backfill_count",
+    "verified_actions_total",
+    "evidence_closed_total",
 )
-SEM_METRICS = (
-    "success_rate", "utility_mean", "steps_total", "duration_s_total",
-    "memory_queries_total", "task_failed_total", "task_blocked_total",
-    "task_precondition_failed_total", "task_partial_total", "task_no_threats_total",
-    "verified_actions_total", "evidence_closed_total",
-)
-MANIFEST_PATH = Path(__file__).with_name("manifests") / "sem_primary_tasks_v1.json"
+MANIFEST_PATH = Path(__file__).with_name("manifests") / "sem_minecraft_tasks_v2.json"
 
 
 def load_task_manifest() -> dict[str, Any]:
@@ -47,45 +50,44 @@ def task_manifest_digest() -> str:
 
 def build_benchmark() -> BenchmarkTaskSet:
     document = load_task_manifest()
-    source_digest = canonical_digest(document)
     tasks = tuple(
         TaskDefinition(
             task_id=str(row["task_id"]),
-            revision_id="v1",
+            revision_id=str(document.get("revision_id", "v2")),
             family=str(row["family"]),
-            schema_id="sem.minecraft.task.v1",
+            schema_id="sem.minecraft.task.v2",
             content_digest=canonical_digest(row),
         )
         for row in sorted(document["tasks"], key=lambda item: str(item["task_id"]))
     )
     return BenchmarkTaskSet(
-        benchmark_id=str(document["manifest_id"]),
-        revision_id="v1",
-        source_digest=source_digest,
-        task_schema_id="sem.minecraft.task.v1",
+        benchmark_id=str(document["benchmark_id"]),
+        revision_id=str(document.get("revision_id", "v2")),
+        source_digest=canonical_digest(document),
+        task_schema_id="sem.minecraft.task.v2",
         tasks=tasks,
     )
 
 
 def build_sem_paper_confirmatory_protocol(
     *,
-    study_id: str = "sem-core6",
-    workload_id: str = "minecraft-primary-core-six",
-    repetitions: int = 12,
+    study_id: str = "sem-minecraft-primary-v2",
+    workload_id: str = "minecraft-memory-evolution-v2",
+    repetitions: int = 3,
 ) -> StudyProtocol:
-    if repetitions != 12:
-        raise ValueError("SEM confirmatory Core-6 repetitions are frozen at 12")
+    if repetitions < 1:
+        raise ValueError("repetitions must be positive")
     variants = tuple(
         StudyVariantSpec(
-            variant_id=variant_id,
-            kind=kind,
-            implementation_id=f"sem-paper.{implementation}",
+            variant_id=treatment,
+            kind=VariantKind.TREATMENT if treatment == "sem" else VariantKind.CONTROL,
+            implementation_id=f"sem-paper.{treatment}",
             configuration_digest=canonical_digest(
-                {"treatment": implementation, "seed": seed}
+                {"treatment": treatment, "benchmark": "minecraft-memory-evolution-v2"}
             ),
-            budget_tier="core",
+            budget_tier="primary",
         )
-        for variant_id, kind, implementation, seed in CORE6_VARIANTS
+        for treatment in TREATMENT_IDS
     )
     return StudyProtocol(
         study_id=study_id,
@@ -93,11 +95,15 @@ def build_sem_paper_confirmatory_protocol(
         variants=variants,
         repetitions=repetitions,
         seed_schedule_digest=canonical_digest(
-            {"seed_identity": ("Seed-C", "Seed-X"), "repetitions": repetitions}
+            {
+                "scheme": "deterministic-hash-derived",
+                "namespace": "sem-minecraft-primary-v2",
+                "repetitions": repetitions,
+            }
         ),
-        metric_names=SEM_METRICS,
+        metric_names=PRIMARY_METRICS,
         task_manifest_digest=task_manifest_digest(),
-        budget_tiers=("core",),
+        budget_tiers=("primary",),
     )
 
 
@@ -110,7 +116,7 @@ def compile_sem_paper_experiment_plan(
         VariantBinding(
             variant=variant,
             intervention_digest=canonical_digest(
-                {"variant_id": variant.variant_id, "seed": _seed(variant.variant_id)}
+                {"variant_id": variant.variant_id, "protocol": protocol.protocol_digest}
             ),
             provider_id=variant.implementation_id,
             ablation_policy_id="none",
@@ -121,24 +127,23 @@ def compile_sem_paper_experiment_plan(
     return ExperimentPlan.compile(protocol, bindings, assignments)
 
 
-def _seed(variant_id: str) -> str:
-    return "Seed-X" if variant_id.endswith("-x") else "Seed-C"
-
-
 def is_confirmatory_protocol(protocol: StudyProtocol) -> bool:
     return (
-        protocol.study_id == "sem-core6"
-        and protocol.workload_id == "minecraft-primary-core-six"
-        and protocol.repetitions == 12
-        and tuple(item.variant_id for item in protocol.variants)
-        == tuple(item[0] for item in CORE6_VARIANTS)
-        and set(protocol.budget_tiers) == {"core"}
+        protocol.study_id == "sem-minecraft-primary-v2"
+        and protocol.workload_id == "minecraft-memory-evolution-v2"
+        and tuple(item.variant_id for item in protocol.variants) == TREATMENT_IDS
+        and set(protocol.budget_tiers) == {"primary"}
     )
 
 
 __all__ = [
-    "CORE6_VARIANTS", "MANIFEST_PATH", "SEM_METRICS",
-    "build_benchmark", "load_task_manifest", "task_manifest_digest",
-    "build_sem_paper_confirmatory_protocol", "compile_sem_paper_experiment_plan",
+    "MANIFEST_PATH",
+    "PRIMARY_METRICS",
+    "TREATMENT_IDS",
+    "build_benchmark",
+    "load_task_manifest",
+    "task_manifest_digest",
+    "build_sem_paper_confirmatory_protocol",
+    "compile_sem_paper_experiment_plan",
     "is_confirmatory_protocol",
 ]

@@ -1,44 +1,62 @@
-# SEM benchmark 接入决策
+# SEM benchmark 接入与 baseline 决策
 
 ## 结论
 
-SEM 的第一方主 benchmark 是 SEM-EvoBench v1，而不是把外部 benchmark
-搬进 Noetrium 的 environment。它负责验证 memory -> action -> outcome ->
-validation -> evolution 的完整闭环。
+主实验采用 MineEvolve 70-task suite 作为任务来源，选择 12 个能映射到
+Noetrium Mineflayer 高层动作接口的任务作为当前 v2 executable subset。
+这保留了公开任务的技术树、资源、导航、战斗和建造覆盖，只做最小的
+success spec 与动作接口归一化。
 
-外部对照分层接入：
+主实验不是把外部 simulator 代码塞进 Noetrium。Noetrium 只提供通用的
+environment/provider、action/effect、evidence、assignment isolation 和
+study-plan contract；SEM 负责记忆方法、Minecraft task manifest、planner
+适配、评分和论文实验协议。
 
-| benchmark | 用途 | SEM 归属 | 当前状态 |
+## 同栈 baseline 与外部 SOTA reference
+
+| 层次 | 系统 | 实验作用 | 是否进入 paired 主表 |
 |---|---|---|---|
-| MemoryArena | 多 session、action/feedback agent loop | external comparison | metadata only |
-| MemoryAgentBench | incremental multi-turn memory 能力 | memory-only comparison | metadata only |
-| LongMemEval | 长期会话回归与 temporal/update/abstention | regression | metadata only |
-| BEAM | 超长上下文容量压力 | stress test | metadata only |
-| MineDojo | Minecraft programmatic task source | optional task source | metadata only |
+| matched lower bound | no_memory | 无长期记忆 | 是 |
+| matched memory baseline | flat_episodic | 无类型关系的 episodic memory | 是 |
+| matched structural baseline | fixed_typed | 固定 typed graph | 是 |
+| proposed method | sem | 语义责任拓扑自进化 | 是 |
+| external system reference | MineEvolve | execution-feedback self-evolution | 否，除非同接口重跑 |
+| external system reference | Voyager | open-ended skill acquisition | 否，除非同接口重跑 |
+| external system reference | JARVIS-1 | multimodal long-horizon Minecraft | 否，除非同接口重跑 |
 
-外部 benchmark 不改变 Noetrium 的 environment ownership。MineDojo 不是
-memory benchmark；它只能提供冻结后的任务及 success spec。
+原因是外部系统的 model、executor、Minecraft 版本、任务采样和成功判定
+不同。直接把它们的公开成绩和 SEM 数字放在同一列会混淆系统级比较与
+记忆机制的因果比较。catalog 保留来源、revision、scope、role 和
+runtime_status=reference_only，后续若实现统一 adapter 才升级为可比结果。
+## 外部 memory benchmark
 
-## 接口和冻结规则
+MemoryAgentBench、MemoryArena、LongMemEval 和 BEAM 作为通用 memory
+benchmark 的外部定位与可选复用来源。当前 JsonTaskBenchmarkAdapter 只
+导入冻结的 task metadata 和 content digest，不执行外部 runtime，也不
+改变 Noetrium environment ownership。它们的用途分别是 incremental
+multi-turn memory、multi-session agent-environment loop、long-term
+conversation regression 和 long-context stress。
 
-JsonTaskBenchmarkAdapter 只导入本地冻结的 task metadata，输出 Noetrium
-BenchmarkTaskSet。prepare_external_benchmark 会保留 benchmark id、revision、
-source digest、task content digest 和 execution owner。它不执行 action、
-不写 memory，也不接受 provider 的隐式成功。
+因此，外部 benchmark 的 metadata-prepared 输出不是实验结果。若要加入
+论文主结果，必须同时固定数据版本、任务顺序、模型、context budget、
+success rule、assignment split 和 raw evidence schema。
+## 冻结接口
 
-外部来源：
+真实 Minecraft task 的调用链为：
 
-- MemoryArena: https://arxiv.org/abs/2602.16313
-- MemoryAgentBench: https://openreview.net/forum?id=DT7JyQC3MR
-- LongMemEval: https://arxiv.org/abs/2410.10813
-- BEAM: https://openreview.net/forum?id=y59hf5lrMn
-- MineDojo: https://github.com/MineDojo/MineDojo
+    task manifest -> SEM recall -> model planner -> Noetrium Mineflayer bridge
+    -> verified action/effect receipt -> SEM task completion -> evidence/evolution
 
-## 暂缓事项
+planner 只输出白名单动作；它不能声明任务成功，也不能直接写 memory。
+bridge 只返回 grounded outcome、verified 标志和 self snapshot。SEM 只在
+task completion 后处理 evidence、检测 structural demand 并更新自己的
+semantic topology。这样 baseline 只替换 memory treatment，不替换环境
+执行器或 success evaluator。
 
-当前镜像没有把外部 simulator/runtime 当作环境依赖安装。只有在数据版本、
-运行时、任务 success spec、provider mapping、assignment reset、effect
-receipt 和 evidence closure 全部冻结后，才允许外部 full-N 执行。
+真实运行入口：
 
-当前 CLI 的 benchmark-catalog 和 external-prepare 是可审计的元数据入口；
-输出状态仍是 metadata_only / metadata_prepared，不是实验结论。
+    python -m projects.sem_paper.cli real-pilot
+    python -m projects.sem_paper.cli real --repetitions 3
+
+必须配置 assignment-level fresh world reset。没有 reset 的运行可以用于
+工程调试，但只能标记 exploratory_real_matrix。

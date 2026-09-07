@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 from projects.sem_paper.api import PROJECT_MANIFEST
 from projects.sem_paper.benchmarks import (
@@ -28,7 +29,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--streams-per-track", type=int, default=2)
     parser.add_argument("--benchmark-id")
     parser.add_argument("--task-export")
+    parser.add_argument("--repetitions", type=int)
+    parser.add_argument("--results-dir")
+    parser.add_argument("--planner-mode", choices=("model", "scripted"))
+    parser.add_argument("--model-base-url")
+    parser.add_argument("--model-name")
     args = parser.parse_args(argv)
+    if args.repetitions is not None:
+        os.environ["SEM_REPETITIONS"] = str(args.repetitions)
+    if args.results_dir:
+        os.environ["SEM_RESULTS_DIR"] = args.results_dir
+    if args.planner_mode:
+        os.environ["SEM_PLANNER_MODE"] = args.planner_mode
+    if args.model_base_url:
+        os.environ["SEM_MODEL_BASE_URL"] = args.model_base_url
+    if args.model_name:
+        os.environ["SEM_MODEL_NAME"] = args.model_name
     if args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()
         plan = compile_sem_paper_experiment_plan(protocol)
@@ -89,10 +105,10 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark_digest": definition.digest,
             "streams": len(streams),
             "scores": [score.as_dict() for score in scores],
-            "claim_status": "reference_fixture_only",
+            "claim_status": "diagnostic_only",
         }
     elif args.command == "real":
-        report = run_real_matrix()
+        report = run_real_matrix(args.repetitions)
         payload = {
             "environment": "minecraft.mineflayer.jsonl.v1",
             "protocol_digest": report.protocol_digest,
@@ -104,12 +120,14 @@ def main(argv: list[str] | None = None) -> int:
                 for row in report.aggregates
             ],
             "claim_status": (
-                "exploratory_real_matrix"
-                if not __import__("os").environ.get("MC_REQUIRE_WORLD_RESET") == "1"
-                else "confirmatory_real_matrix"
+                "confirmatory_real_matrix"
+                if os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
+                and os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
+                else "exploratory_real_matrix"
             ),
-            "world_reset_per_assignment": bool(
-                __import__("os").environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
+            "world_reset_per_assignment": (
+                os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
+                and bool(os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip())
             ),
         }
     elif args.command == "real-pilot":

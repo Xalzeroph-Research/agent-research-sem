@@ -1,53 +1,101 @@
-# SEM protocol
+# SEM 实验协议（Minecraft 主实验 v2）
 
-## Ownership
+## 1. 研究对象与比较原则
 
-Noetrium is the upstream platform. It owns stable lifecycle, identity,
-environment/provider, participant, study, run-control, assignment isolation,
-action/effect, and evidence contracts.
+SEM 研究的是长期交互中的记忆表示与语义责任组织：智能体是否能把
+环境经历转化为可复用、可校验、可演化的记忆结构。实验只改变长期记忆
+处理方式；Minecraft 版本、世界初始化、Noetrium 环境 provider、动作
+接口、模型 planner、任务清单、预算、成功判定和日志格式全部冻结。
 
-SEM owns the memory algorithm, Fixed/Rule/Self treatment semantics, benchmark
-task-stream semantics, metrics, analysis, and scientific claim rules. The
-downstream package imports Noetrium only through noetrium.contracts and the
-documented study runtime surface.
+主实验的四个条件为：
 
-## Current primary protocol
+| 条件 | 记忆行为 | 是否允许拓扑演化 |
+|---|---|---|
+| no_memory | 不保留可供后续任务查询的长期记忆 | 否 |
+| flat_episodic | 以单一 episodic 容器保存经历 | 否 |
+| fixed_typed | context → episode → outcome 的固定类型图 | 否 |
+| sem | 同一初始 typed 图，依据失败反馈提出并应用语义拓扑编辑 | 是 |
 
-The current SEM-owned protocol is SEM-EvoBench v1. It has four tracks:
-memory_core, experience_transfer, agentic_closed_loop, and environment_drift.
-Each track is a six-episode ordered stream with matched fixed_memory,
-rule_based, and self_evolving treatments.
+fixed_typed 是主因果参照；SEM 与它共享初始化、信息、planner 和
+执行预算，因此差异可归因于语义拓扑自进化，而不是系统规模或模型差异。
+## 2. Benchmark 与任务来源
 
-The executable definition, stream digests, paired-control scoring, candidate
-validation, and raw traces live in projects/sem_paper/benchmarks/evo_protocol.py.
-Use:
+主 benchmark 的可执行定义位于
+projects/sem_paper/experiments/manifests/sem_minecraft_tasks_v2.json，
+benchmark id 为 sem_minecraft_memory_evolution，revision 为 v2。
+任务尽量复用 MC-MineEvolve 的 70-task suite，保留其 wooden、stone、
+iron、open-world、combat、construction、armor 等任务族；当前主矩阵
+使用其中 12 个 executor-compatible 任务，因 MineEvolve 的原始执行器
+与 Noetrium Mineflayer provider 不同，做了最小的动作接口归一化和 grounded
+success spec 转换。
 
-    python -m projects.sem_paper.cli evobench --streams-per-track 2
+12 个任务在同一 assignment 内按固定顺序运行并共享世界状态；不同
+assignment 需要 fresh vanilla world。每个任务有 task id、来源引用、
+目标、family、最大动作数、时间预算、success spec 和动作白名单。
+manifest 中的 action_plan 只用于 scripted smoke，真实 model run 不会
+把它发送给 planner，避免答案泄漏。
+## 3. Baseline 矩阵
 
-## Treatment and evidence rules
+主论文报告同一 Noetrium/Minecraft 接口下的四条件结果。它们是严格的
+matched-stack baseline，而非手工编造的“能力分数”：
 
-fixed_memory is immutable. rule_based adopts a bounded candidate immediately.
-self_evolving requires later verified positive utility before adoption. The
-candidate lifecycle is explicit: proposed, validated, adopted/rejected,
-generation, and policy override.
+- no_memory：无长期记忆下界，检验任务是否仅靠当前观察即可完成。
+- flat_episodic：有记忆但没有类型/关系组织，检验“存储经历”本身的收益。
+- fixed_typed：固定 context/episode/outcome 图，检验结构化但不演化的记忆。
+- sem：本文方法，检验语义责任拓扑能否在失败后产生可复用结构。
 
-The local scripted Minecraft provider implements the Noetrium environment
-lifecycle and is a deterministic conformance fixture. It cannot confer a
-scientific claim. Real Mineflayer execution can replace the fixture at the
-compiled plan boundary only after assignment reset, effect receipts, recovery,
-and evidence closure are verified.
+此外，catalog 中记录 MineEvolve、Voyager、JARVIS-1、MemoryAgentBench、
+MemoryArena、LongMemEval 和 BEAM。它们用于外部定位、任务复用和结果
+讨论；若未在相同 Minecraft 版本、同一动作 API、同一 planner 和同一
+success spec 下重跑，不把其公开数字伪装成 paired baseline。
+## 4. 运行与随机化
 
-## Legacy status
+protocol builder 为 build_sem_paper_confirmatory_protocol，默认
+3 repetitions；每个 repetition 由确定性 hash 生成 seed。Noetrium
+ExperimentPlan 固化 assignment、variant binding、protocol digest、
+task manifest digest 和 metric names。独立统计单位是 assignment，而
+不是把所有 task 行展平后当独立样本。
 
-The old Minecraft Core-6 matrix remains available for compatibility through
-the legacy protocol CLI, but it is archived and not claim-bearing. The audit
-found treatment/identity and causal-closure defects in its earlier evidence.
-Its results must not be pooled with SEM-EvoBench.
+真实运行必须设置：
 
-Benchmark, replay, synthetic, tool, and multi-agent are not environment
-categories. External benchmark adapters import metadata only and keep
-execution at the SEM method -> Noetrium environment -> effect/evidence
-boundary.
+    SEM_PLANNER_MODE=model
+    SEM_MODEL_BASE_URL=http://127.0.0.1:8002/v1
+    SEM_MODEL_NAME=qwen
+    MC_HOST=127.0.0.1
+    MC_PORT=25565
+    MC_VERSION=1.21.1
+    MC_REQUIRE_WORLD_RESET=1
+    MC_ASSIGNMENT_RESET_COMMAND=<fresh-world supervisor command>
+    SEM_RESULTS_DIR=<raw-result-directory>
 
-See SEM_EVO_BENCHMARK.md and BENCHMARK_INTEGRATION_20260906.md for the
-frozen benchmark and external comparison roles.
+入口：
+
+    python -m projects.sem_paper.cli doctor
+    python -m projects.sem_paper.cli protocol
+    python -m projects.sem_paper.cli real-pilot
+    python -m projects.sem_paper.cli real --repetitions 3
+## 5. 记录指标与分析
+
+每个 assignment 输出一份不可覆盖的 raw JSON，包含 assignment identity、
+variant binding、diagnostics、task result、action outcome code、verified
+effects 和 evidence digest。主指标为：
+
+- success_rate：任务成功比例；
+- utility_mean、steps_total、duration_s_total：任务效用与成本；
+- memory_queries_total、memory_entries_total、active_node_count；
+- architecture_generation、candidate_count、adopted_count、rejected_count；
+- historical_backfill_count、verified_actions_total、evidence_closed_total。
+
+统计时先按 assignment 聚合，再计算 treatment 的均值和 paired
+sem - fixed_typed 差值；报告 bootstrap 或 paired permutation 的
+95% 区间，并同时报告每个任务族的结果。结构指标不能替代成功率，只用于
+解释 SEM 是否确实改变了表示结构。
+
+## 6. 有效性边界
+
+scripted fixture、EvoBench diagnostic stream 和 real-pilot 只验证接口、
+确定性和日志闭环，不支持论文结论。只有真实 vanilla server、真实
+model planner、每 assignment world reset、verified action receipt、
+evidence closure 和完整 repetition 矩阵都通过，结果才可进入 claim-ready
+表格。若 world reset 未配置，CLI 必须标记 exploratory，不能称为严格
+confirmatory。

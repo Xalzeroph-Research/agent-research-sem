@@ -110,6 +110,24 @@ EXTERNAL_BENCHMARKS = (
         "https://openreview.net/forum?id=y59hf5lrMn",
         "long-context memory stress", "capacity_stress",
     ),
+    ExternalBenchmarkSpec(
+        "mineevolve", "2025", "NeurIPS 2025 reference system",
+        "https://github.com/xym-lab/MC-MineEvolve",
+        "70-task Minecraft execution-feedback evaluation", "external_sota_reference",
+        "reference_only",
+    ),
+    ExternalBenchmarkSpec(
+        "voyager", "2023", "NeurIPS 2023",
+        "https://voyager.minedojo.org/",
+        "open-ended Minecraft skill acquisition", "external_sota_reference",
+        "reference_only",
+    ),
+    ExternalBenchmarkSpec(
+        "jarvis-1", "2024", "arXiv reference system",
+        "https://craftjarvis-jarvis1.github.io/",
+        "multimodal Minecraft long-horizon task execution", "external_sota_reference",
+        "reference_only",
+    ),
 )
 
 

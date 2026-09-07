@@ -25,6 +25,7 @@ from noetrium.contracts import (
 
 from projects.sem_paper.experiments.protocol import load_task_manifest
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
+from projects.sem_paper.composition.model_planner import ModelActionPlanner
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +160,7 @@ class ScriptedMinecraftEnvironment:
         )
         digest = hashlib.sha256(f"{seed}:{variant_id}:{task_id}".encode()).hexdigest()
         score = int(digest[:8], 16) % 100
-        boost = {"fixed": 0, "rule": 12, "self": 20}.get(variant_id.split("-")[0], 0)
+        boost = {"no_memory": 0, "flat_episodic": 6, "fixed_typed": 10, "sem": 14}.get(variant_id, 0)
         success = score < 58 + boost
         blocked = not success and score % 2 == 0
         steps = 8 + (int(digest[8:12], 16) % 20)
@@ -167,7 +168,7 @@ class ScriptedMinecraftEnvironment:
         outcome = MethodTaskOutcome(
             task_id=task_id,
             family=str(task["family"]),
-            lineage_id=str(task["lineage_id"]),
+            lineage_id=str(task.get("lineage_id", canonical_digest(task))),
             success=success,
             utility=(1.0 if success else -0.25) + len(before.artifacts) * 0.01,
             steps=steps,
@@ -259,6 +260,15 @@ class _MinecraftBridgeClient:
         )
         if ack.get("verified") is False:
             raise RuntimeError(str(ack.get("error") or ack))
+
+    def snapshot(self) -> dict[str, Any]:
+        _, events = self._request(
+            {"cmd": "snapshot"}, wait_kinds=frozenset({"self_snapshot"})
+        )
+        payload = events["self_snapshot"].get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Minecraft bridge returned malformed self_snapshot")
+        return payload
 
     def action(
         self,
@@ -374,22 +384,40 @@ class RealMinecraftEnvironment:
         bridge = _MinecraftBridgeClient(run_identity=run_identity)
         bridge.recovery_dir = recovery_dir
         bridge.start()
+        planner = (
+            ModelActionPlanner()
+            if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model"
+            else None
+        )
         results: list[EnvironmentTaskResult] = []
         try:
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
                 started = time.monotonic()
                 before = session.recall(RecallRequest(str(task["goal"]), None, limit=4))
-                plan = session.plan_actions(task)
+                snapshot = bridge.snapshot()
+                if planner is not None:
+                    plan = planner.plan(
+                        task=task,
+                        memory_context=before.context_text,
+                        snapshot=snapshot,
+                    )
+                    if not plan:
+                        raise RuntimeError(
+                            f"model planner returned an empty plan for task {task_id}"
+                        )
+                else:
+                    plan = session.plan_actions(task)
                 task_results = self._run_real_task(
-                    bridge, task, task_id, str(task["lineage_id"]), plan
+                    bridge, task, task_id,
+                    str(task.get("lineage_id", canonical_digest(task))), plan
                 )
                 success, failure_class = self._validate_task(task, task_results)
                 steps = len(task_results)
                 outcome = MethodTaskOutcome(
                     task_id=task_id,
                     family=str(task["family"]),
-                    lineage_id=str(task["lineage_id"]),
+                    lineage_id=str(task.get("lineage_id", canonical_digest(task))),
                     success=success,
                     utility=1.0 if success else -0.25,
                     steps=steps,
@@ -507,6 +535,8 @@ class RealMinecraftEnvironment:
     ) -> list[dict[str, Any]]:
         family = str(task["family"])
         actions: list[tuple[str, dict[str, Any], float]] = list(plan)
+        if not actions and os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model":
+            raise RuntimeError(f"no executable model plan for task {task_id}")
         if not actions and family == "resource_collection":
             actions = [("collect_block", {"block": "oak_log", "count": 4, "max_distance": 64}, 240.0)]
         elif not actions and family == "crafting_tech_tree":

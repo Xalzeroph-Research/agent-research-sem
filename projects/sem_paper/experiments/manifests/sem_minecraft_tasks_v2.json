@@ -1,0 +1,441 @@
+{
+  "benchmark_id": "sem_minecraft_memory_evolution",
+  "revision_id": "v2",
+  "schema_version": "sem.minecraft.task.v2",
+  "source_benchmark": {
+    "name": "MineEvolve 70-task evaluation suite",
+    "source_url": "https://github.com/xym-lab/MC-MineEvolve",
+    "reuse_policy": "executor-compatible task subset with normalized grounded success checks"
+  },
+  "environment": {
+    "provider": "Noetrium Mineflayer JSONL bridge",
+    "minecraft_version": "1.21.1",
+    "world_policy": "one fresh vanilla world per assignment; tasks share state within assignment"
+  },
+  "planner": {
+    "mode": "model_required_for_real",
+    "allowed_actions": [
+      "collect_block",
+      "craft_item",
+      "smelt_item",
+      "place_block",
+      "move_away",
+      "goto",
+      "defend_self",
+      "observe_entities",
+      "wait"
+    ]
+  },
+  "tasks": [
+    {
+      "task_id": "wooden_collect_logs_v2",
+      "family": "resource_collection",
+      "source_ref": "MineEvolve:wooden",
+      "goal": "Collect at least four oak log blocks from the nearby world.",
+      "context": "Use only current observations and grounded inventory state.",
+      "max_steps": 8,
+      "max_seconds": 240,
+      "success": {
+        "kind": "inventory_delta_min",
+        "item": "oak_log",
+        "count": 4
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "oak_log",
+            "count": 4,
+            "max_distance": 64
+          },
+          "timeout_s": 240
+        }
+      ]
+    },
+    {
+      "task_id": "stone_collect_cobblestone_v2",
+      "family": "resource_collection",
+      "source_ref": "MineEvolve:stone",
+      "goal": "Collect at least three cobblestone blocks.",
+      "context": "The task is complete only when the inventory delta is grounded.",
+      "max_steps": 8,
+      "max_seconds": 240,
+      "success": {
+        "kind": "inventory_delta_min",
+        "item": "cobblestone",
+        "count": 3
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "cobblestone",
+            "count": 3,
+            "max_distance": 48
+          },
+          "timeout_s": 240
+        }
+      ]
+    },
+    {
+      "task_id": "stone_craft_pickaxe_v2",
+      "family": "crafting_tech_tree",
+      "source_ref": "MineEvolve:stone",
+      "goal": "Craft one stone pickaxe from resources available in the current world.",
+      "context": "Respect the current inventory and nearby crafting-table state.",
+      "max_steps": 8,
+      "max_seconds": 300,
+      "success": {
+        "kind": "inventory_min",
+        "item": "stone_pickaxe",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "oak_planks",
+            "count": 16
+          },
+          "timeout_s": 60
+        },
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "cobblestone",
+            "count": 3,
+            "max_distance": 48
+          },
+          "timeout_s": 180
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "stone_pickaxe",
+            "count": 1
+          },
+          "timeout_s": 90
+        }
+      ]
+    },
+    {
+      "task_id": "stone_craft_furnace_v2",
+      "family": "crafting_tech_tree",
+      "source_ref": "MineEvolve:stone",
+      "goal": "Craft one furnace using resources available in the current world.",
+      "context": "Do not assume a furnace exists unless it is observed.",
+      "max_steps": 8,
+      "max_seconds": 300,
+      "success": {
+        "kind": "inventory_min",
+        "item": "furnace",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "cobblestone",
+            "count": 8,
+            "max_distance": 48
+          },
+          "timeout_s": 180
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "furnace",
+            "count": 1
+          },
+          "timeout_s": 90
+        }
+      ]
+    },
+    {
+      "task_id": "iron_mine_ore_v2",
+      "family": "resource_collection",
+      "source_ref": "MineEvolve:iron",
+      "goal": "Mine at least three iron ore blocks.",
+      "context": "Use verified harvest effects; a failed attempt is not success.",
+      "max_steps": 8,
+      "max_seconds": 360,
+      "success": {
+        "kind": "inventory_delta_min",
+        "item": "raw_iron",
+        "count": 3
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "iron_ore",
+            "count": 3,
+            "max_distance": 64
+          },
+          "timeout_s": 300
+        }
+      ]
+    },
+    {
+      "task_id": "iron_smelt_ingot_v2",
+      "family": "crafting_tech_tree",
+      "source_ref": "MineEvolve:iron",
+      "goal": "Smelt one iron ore into one iron ingot using an observed furnace and available fuel.",
+      "context": "The output must be observed in inventory after smelting.",
+      "max_steps": 8,
+      "max_seconds": 360,
+      "success": {
+        "kind": "inventory_delta_min",
+        "item": "iron_ingot",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "smelt_item",
+          "arguments": {
+            "item": "raw_iron",
+            "count": 1,
+            "max_distance": 32,
+            "max_wait_s": 120
+          },
+          "timeout_s": 180
+        }
+      ]
+    },
+    {
+      "task_id": "iron_craft_bucket_v2",
+      "family": "crafting_tech_tree",
+      "source_ref": "MineEvolve:iron",
+      "goal": "Craft one bucket.",
+      "context": "Use the current inventory and crafting facilities.",
+      "max_steps": 8,
+      "max_seconds": 300,
+      "success": {
+        "kind": "inventory_min",
+        "item": "bucket",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "bucket",
+            "count": 1
+          },
+          "timeout_s": 120
+        }
+      ]
+    },
+    {
+      "task_id": "navigation_return_v2",
+      "family": "navigation_return",
+      "source_ref": "MineEvolve:open_world",
+      "goal": "Move at least sixteen blocks away from the current spawn anchor and return within five blocks.",
+      "context": "Both departure and return require verified movement evidence.",
+      "max_steps": 8,
+      "max_seconds": 360,
+      "success": {
+        "kind": "away_then_return",
+        "anchor": "spawn",
+        "min_departure_distance": 16,
+        "return_radius": 5
+      },
+      "action_plan": [
+        {
+          "action_type": "move_away",
+          "arguments": {
+            "distance": 16
+          },
+          "timeout_s": 120
+        },
+        {
+          "action_type": "goto",
+          "arguments": {
+            "position": {
+              "x": 9.5,
+              "y": 72,
+              "z": 168.5
+            },
+            "radius": 5
+          },
+          "timeout_s": 180
+        }
+      ]
+    },
+    {
+      "task_id": "combat_survival_v2",
+      "family": "combat_survival",
+      "source_ref": "MineEvolve:combat",
+      "goal": "Engage at least one available hostile mob and remain alive.",
+      "context": "No-threat and unverified attempts are failures.",
+      "max_steps": 8,
+      "max_seconds": 360,
+      "success": {
+        "kind": "combat_survived",
+        "min_verified_combat_actions": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "defend_self",
+          "arguments": {
+            "radius": 32,
+            "max_targets": 1,
+            "max_hits": 8
+          },
+          "timeout_s": 240
+        }
+      ]
+    },
+    {
+      "task_id": "building_station_v2",
+      "family": "simple_building",
+      "source_ref": "MineEvolve:construction",
+      "goal": "Build a crafting table and a chest near the current player position.",
+      "context": "Each placement must return grounded verified block evidence.",
+      "max_steps": 10,
+      "max_seconds": 360,
+      "success": {
+        "kind": "blueprint_complete",
+        "blocks": [
+          "crafting_table",
+          "chest"
+        ]
+      },
+      "action_plan": [
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "crafting_table",
+            "count": 1
+          },
+          "timeout_s": 90
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "chest",
+            "count": 1
+          },
+          "timeout_s": 90
+        },
+        {
+          "action_type": "place_block",
+          "arguments": {
+            "item": "crafting_table"
+          },
+          "timeout_s": 90
+        },
+        {
+          "action_type": "place_block",
+          "arguments": {
+            "item": "chest"
+          },
+          "timeout_s": 90
+        }
+      ]
+    },
+    {
+      "task_id": "iron_craft_pickaxe_v2",
+      "family": "crafting_tech_tree",
+      "source_ref": "MineEvolve:iron",
+      "goal": "Craft one iron pickaxe after obtaining and smelting the required iron.",
+      "context": "Use grounded prerequisites rather than assuming hidden inventory.",
+      "max_steps": 10,
+      "max_seconds": 480,
+      "success": {
+        "kind": "inventory_min",
+        "item": "iron_pickaxe",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "iron_ore",
+            "count": 3,
+            "max_distance": 64
+          },
+          "timeout_s": 240
+        },
+        {
+          "action_type": "smelt_item",
+          "arguments": {
+            "item": "raw_iron",
+            "count": 3,
+            "max_distance": 32,
+            "max_wait_s": 180
+          },
+          "timeout_s": 240
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "iron_pickaxe",
+            "count": 1
+          },
+          "timeout_s": 120
+        }
+      ]
+    },
+    {
+      "task_id": "long_horizon_shield_v2",
+      "family": "long_horizon_mixed",
+      "source_ref": "MineEvolve:armor",
+      "goal": "Gather the required materials and craft one shield.",
+      "context": "This is a multi-stage task; success requires a verified final inventory effect.",
+      "max_steps": 12,
+      "max_seconds": 480,
+      "success": {
+        "kind": "inventory_min",
+        "item": "shield",
+        "count": 1
+      },
+      "action_plan": [
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "oak_log",
+            "count": 4,
+            "max_distance": 64
+          },
+          "timeout_s": 240
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "oak_planks",
+            "count": 6
+          },
+          "timeout_s": 60
+        },
+        {
+          "action_type": "collect_block",
+          "arguments": {
+            "block": "iron_ore",
+            "count": 1,
+            "max_distance": 64
+          },
+          "timeout_s": 120
+        },
+        {
+          "action_type": "smelt_item",
+          "arguments": {
+            "item": "raw_iron",
+            "count": 1,
+            "max_distance": 32,
+            "max_wait_s": 120
+          },
+          "timeout_s": 180
+        },
+        {
+          "action_type": "craft_item",
+          "arguments": {
+            "item": "shield",
+            "count": 1
+          },
+          "timeout_s": 120
+        }
+      ]
+    }
+  ]
+}
