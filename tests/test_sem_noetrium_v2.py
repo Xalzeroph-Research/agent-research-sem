@@ -226,3 +226,38 @@ def test_monitor_state_is_checkpointed() -> None:
         restored.diagnostics()["monitor_query_count"]
         == session.diagnostics()["monitor_query_count"]
     )
+
+def test_sem_nodes_preserve_public_typed_metadata() -> None:
+    session = SEMMethodSession(session_id="metadata", treatment_id="sem", seed="run")
+    initial = {node.node_id: node for node in session._graph.snapshot().nodes}
+    assert initial["memory:context"].mode == "CURRENT"
+    assert initial["memory:context"].access == (
+        "STATE_READ", "MEMORY_ASK", "NODE_DISCOVERY"
+    )
+    session.task_completed(_failure("failed", "precondition_missing"), None)
+    semantic = next(
+        node for node in session._graph.snapshot().nodes
+        if node.node_id.startswith("semantic:")
+    )
+    assert semantic.mode == "AGGREGATE"
+    assert semantic.transform["kind"] == "semantic_projection"
+    assert semantic.provenance["edit_family"] == "CREATE"
+    restored = SEMMethodSession(session_id="metadata", treatment_id="sem", seed="run")
+    restored.restore(session.checkpoint())
+    restored_node = restored._graph.snapshot().node(semantic.node_id)
+    assert restored_node is not None
+    assert restored_node.digest() == semantic.digest()
+
+
+def test_agent_memory_adapter_uses_public_checkpoint_contract() -> None:
+    session = SEMMethodSession(session_id="agent-checkpoint", treatment_id="sem", seed="run")
+    session.ingest({"task_id": "visible", "fact": "persisted"}, None)
+    adapter = SemMethodAgentMemoryAdapter(session)
+    checkpoint = adapter.checkpoint()
+    from noetrium.contracts.systems.participant__agent import AgentMemoryCheckpoint
+    assert isinstance(checkpoint, AgentMemoryCheckpoint)
+    restored = SEMMethodSession(
+        session_id="agent-checkpoint", treatment_id="sem", seed="run"
+    )
+    SemMethodAgentMemoryAdapter(restored).restore(checkpoint)
+    assert restored.diagnostics()["graph_digest"] == session.diagnostics()["graph_digest"]\n

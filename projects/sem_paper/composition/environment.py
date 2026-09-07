@@ -13,6 +13,10 @@ from typing import Any, Mapping
 from noetrium.contracts import (
     ActionRequest,
     ActionResult,
+    AgentGoal,
+    AgentMemoryPort,
+    AgentObservation,
+    AgentStepReceipt,
     EnvironmentCapability,
     EnvironmentIdentity,
     EnvironmentProviderCapabilities,
@@ -141,6 +145,7 @@ class ScriptedMinecraftEnvironment:
         seed: str,
         assignment: object | None = None,
         assignment_isolation: object | None = None,
+        memory: AgentMemoryPort | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
         results = []
         environment_session = self.open_session(
@@ -150,7 +155,8 @@ class ScriptedMinecraftEnvironment:
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 results.append(
                     self._run_task(
-                        session, environment_session, task, variant_id, seed, ordinal
+                        session, environment_session, task, variant_id, seed, ordinal,
+                        memory=memory,
                     )
                 )
             environment_session.checkpoint()
@@ -166,14 +172,47 @@ class ScriptedMinecraftEnvironment:
         variant_id: str,
         seed: str,
         ordinal: int,
+        *,
+        memory: AgentMemoryPort | None = None,
     ) -> EnvironmentTaskResult:
         task_id = str(task["task_id"])
         goal = str(task["goal"])
-        before = session.recall(RecallRequest(goal, None, limit=4))
         observation = environment_session.observe(None)
+        agent_observation = AgentObservation(
+            f"{task_id}:observation:{ordinal}",
+            f"{variant_id}:{ordinal}",
+            dict(observation.payload),
+            evidence_payload=dict(observation.payload),
+        )
+        if memory is None:
+            before = session.recall(RecallRequest(goal, None, limit=4))
+        else:
+            before = memory.recall(
+                AgentGoal(
+                    task_id,
+                    goal,
+                    context={"variant_id": variant_id, "seed": seed},
+                ),
+                agent_observation,
+                {},
+            )
         action = environment_session.act(
             ActionRequest(f"task:{task_id}", "run_task", {"task_id": task_id}, None)
         )
+        if memory is not None:
+            memory.record(
+                AgentStepReceipt(
+                    action.action_id,
+                    "run_task",
+                    "environment.run_task",
+                    f"{variant_id}:{seed}:{task_id}",
+                    action.accepted,
+                    action.accepted,
+                    observation=agent_observation,
+                    effect_certainty="confirmed" if action.accepted else "rejected",
+                ),
+                {},
+            )
         session.ingest(
             {
                 "environment": self.environment_id,
@@ -391,6 +430,7 @@ class RealMinecraftEnvironment:
         seed: str,
         assignment: object | None = None,
         assignment_isolation: object | None = None,
+        memory: AgentMemoryPort | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
         if assignment_isolation is None:
             self._reset_assignment_world(session.session_id)
@@ -420,8 +460,27 @@ class RealMinecraftEnvironment:
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
                 started = time.monotonic()
-                before = session.recall(RecallRequest(str(task["goal"]), None, limit=4))
                 snapshot = bridge.snapshot()
+                agent_observation = AgentObservation(
+                    f"{task_id}:observation:{ordinal}",
+                    f"{variant_id}:{ordinal}",
+                    dict(snapshot),
+                    evidence_payload=dict(snapshot),
+                )
+                if memory is None:
+                    before = session.recall(
+                        RecallRequest(str(task["goal"]), None, limit=4)
+                    )
+                else:
+                    before = memory.recall(
+                        AgentGoal(
+                            task_id,
+                            str(task["goal"]),
+                            context={"variant_id": variant_id, "seed": seed},
+                        ),
+                        agent_observation,
+                        {},
+                    )
                 if planner is not None:
                     plan = planner.plan(
                         task=task,
@@ -450,6 +509,24 @@ class RealMinecraftEnvironment:
                     failure_reason="" if success else failure_class,
                     memory_queries=1,
                 )
+                if memory is not None:
+                    verified = bool(task_results) and all(
+                        bool(item.get("verified")) for item in task_results
+                    )
+                    memory.record(
+                        AgentStepReceipt(
+                            f"{run_identity}:{task_id}",
+                            "minecraft_task",
+                            "minecraft.task",
+                            f"{run_identity}:{task_id}",
+                            bool(task_results),
+                            verified,
+                            observation=agent_observation,
+                            effect_certainty="confirmed" if verified else "rejected",
+                            diagnostics={"action_count": len(task_results)},
+                        ),
+                        {},
+                    )
                 session.ingest(
                     {
                         "environment": self.environment_id,

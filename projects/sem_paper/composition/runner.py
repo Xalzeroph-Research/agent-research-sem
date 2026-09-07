@@ -24,7 +24,10 @@ from projects.sem_paper.composition.environment import (
     RealMinecraftEnvironment,
     ScriptedMinecraftEnvironment,
 )
-from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
+from projects.sem_paper.method.self_evolving_memory import (
+    SEMMethodSession,
+    SemMethodAgentMemoryAdapter,
+)
 
 
 @dataclass
@@ -69,6 +72,11 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             adaptive=treatment == "sem",
             initial_memory=(),
         )
+        memory = (
+            None
+            if treatment == "no_memory"
+            else SemMethodAgentMemoryAdapter(session)
+        )
         isolation = None
         isolation_receipt: EnvironmentAssignmentIsolationReceipt | None = None
         if self.assignment_isolation_factory is not None:
@@ -90,6 +98,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 seed=assignment.seed,
                 assignment=assignment,
                 assignment_isolation=isolation,
+                memory=memory,
             )
             diagnostics = dict(session.diagnostics())
         finally:
