@@ -27,6 +27,11 @@ from noetrium.contracts import (
     canonical_digest,
 )
 
+from noetrium.contracts.systems.environment__minecraft import (
+    MinecraftBridgeCommandResult,
+    MinecraftBridgePort,
+)
+
 from projects.sem_paper.experiments.protocol import load_task_manifest
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
 from projects.sem_paper.composition.model_planner import ModelActionPlanner
@@ -268,6 +273,47 @@ class _MinecraftBridgeClient:
         self.process: subprocess.Popen[str] | None = None
         self._counter = 0
 
+    @property
+    def action_recovery_durability(self) -> str:
+        return "durable"
+
+    def configure_action_recovery(self, namespace: str) -> None:
+        if not namespace.strip():
+            raise ValueError("Minecraft action-recovery namespace is required")
+        self.recovery_dir = namespace
+
+    def supports_command(self, command: str) -> bool:
+        return bool(command.strip())
+
+    def command(
+        self,
+        command: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_s: float,
+    ) -> MinecraftBridgeCommandResult:
+        if not self.supports_command(command):
+            raise ValueError("Minecraft bridge command is required")
+        event_kind = str(payload.get("_wait_kind", "action_result"))
+        request_payload = {
+            key: value for key, value in payload.items() if key != "_wait_kind"
+        }
+        ack, events = self._request(
+            {"cmd": command, **request_payload},
+            wait_kinds=frozenset({event_kind}),
+            timeout_s=timeout_s,
+        )
+        event = events.get(event_kind, {})
+        event_payload = event.get("payload", event)
+        diagnostics = dict(event_payload) if isinstance(event_payload, Mapping) else {}
+        verified = diagnostics.get("verified")
+        return MinecraftBridgeCommandResult(
+            command=command,
+            acknowledged=bool(ack.get("accepted", ack.get("ok", True))),
+            verified=bool(verified) if verified is not None else None,
+            diagnostics=diagnostics,
+        )
+
     def _request(
         self,
         payload: dict[str, Any],
@@ -327,13 +373,15 @@ class _MinecraftBridgeClient:
             raise RuntimeError(str(ack.get("error") or ack))
 
     def snapshot(self) -> dict[str, Any]:
-        _, events = self._request(
-            {"cmd": "snapshot"}, wait_kinds=frozenset({"self_snapshot"})
+        result = self.command(
+            "snapshot",
+            {"_wait_kind": "self_snapshot"},
+            timeout_s=90.0,
         )
-        payload = events["self_snapshot"].get("payload")
+        payload = result.diagnostics
         if not isinstance(payload, dict):
             raise RuntimeError("Minecraft bridge returned malformed self_snapshot")
-        return payload
+        return dict(payload)
 
     def action(
         self,
@@ -358,15 +406,14 @@ class _MinecraftBridgeClient:
         request["_request_digest"] = hashlib.sha256(
             canonical_bytes(request)
         ).hexdigest()
-        _, events = self._request(
-            request,
-            wait_kinds=frozenset({"action_result"}),
+        result = self.command(
+            action_type,
+            {**request, "_wait_kind": "action_result"},
             timeout_s=max(90.0, timeout_s + 30.0),
         )
-        result = events["action_result"].get("payload")
-        if not isinstance(result, dict):
+        if not isinstance(result.diagnostics, Mapping):
             raise RuntimeError("Minecraft bridge returned malformed action_result")
-        return result
+        return dict(result.diagnostics)
 
     def close(self) -> None:
         if self.process is None:

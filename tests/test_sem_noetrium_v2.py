@@ -260,4 +260,4 @@ def test_agent_memory_adapter_uses_public_checkpoint_contract() -> None:
         session_id="agent-checkpoint", treatment_id="sem", seed="run"
     )
     SemMethodAgentMemoryAdapter(restored).restore(checkpoint)
-    assert restored.diagnostics()["graph_digest"] == session.diagnostics()["graph_digest"]\n
+    assert restored.diagnostics()["graph_digest"] == session.diagnostics()["graph_digest"]
