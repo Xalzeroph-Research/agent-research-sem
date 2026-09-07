@@ -29,6 +29,8 @@ from noetrium.contracts.systems.components import (
 )
 
 from .gate import ProposalBlindGate
+from .evidence import EvidenceJournal
+from .monitor import ArchitectureIndependentMonitor
 
 
 SEM_TREATMENTS = frozenset({"no_memory", "flat_episodic", "fixed_typed", "sem"})
@@ -179,6 +181,8 @@ class SEMMethodSession:
         self._rejected_count = 0
         self._backfilled_count = 0
         self._mismatch_count = 0
+        self._journal = EvidenceJournal()
+        self._monitor = ArchitectureIndependentMonitor()
         self._gate = ProposalBlindGate()
         self._graph = VersionedMemoryGraph(self._initial_snapshot(treatment_id))
         for text in initial_memory:
@@ -271,8 +275,21 @@ class SEMMethodSession:
             return event
         if event.evidence_id not in {item.evidence_id for item in self._evidence}:
             self._evidence.append(event)
+            self._journal.append(event, channel="memory")
             self._append_entry(payload, source)
         return event
+
+    def record_audit(self, evidence: Mapping[str, Any], context: object = None) -> str:
+        """Record held-out audit evidence without exposing it to memory."""
+        payload = dict(evidence)
+        event = EvidenceEvent.build(
+            task_id=str(payload.get("task_id", "audit")),
+            family="audit",
+            payload=payload,
+            source="audit",
+            generation=self.generation,
+        )
+        return self._journal.append(event, channel="audit")
 
     def _update_node_evidence(self, node_id: str, evidence_id: str) -> None:
         snapshot = self._graph.snapshot()
@@ -348,6 +365,7 @@ class SEMMethodSession:
         selected.sort(key=lambda item: (-item[0], -item[1]))
         limit = max(1, int(request.limit))
         chosen = [item[2] for item in selected[:limit]]
+        self._monitor.record_query(hit=bool(chosen))
         return RecallResult(
             "\n".join(self._payload_text(item.payload) for item in chosen),
             self.generation,
@@ -405,13 +423,16 @@ class SEMMethodSession:
             "operation": operation,
         })[:24]
         evidence_ids = tuple(event.evidence_id for event in matching)
+        opportunity = self._monitor.observe_failure(
+            signal=failure, evidence_ids=evidence_ids,
+        )
         return StructuralDemand(
             demand_id,
             outcome.task_id,
             outcome.family,
             failure,
             operation,
-            evidence_ids,
+            opportunity.evidence_ids,
             target_ids,
             canonical_digest({
                 "demand_id": demand_id,
@@ -764,6 +785,16 @@ class SEMMethodSession:
                 for event in self._evidence
             ],
             "graph": self._snapshot_dict(self._graph.snapshot()),
+            "audit_evidence": [
+                {
+                    "evidence_id": event.evidence_id, "task_id": event.task_id,
+                    "family": event.family, "payload": dict(event.payload),
+                    "source": event.source, "generation": event.generation,
+                    "digest": event.digest,
+                }
+                for event in self._journal.audit_events
+            ],
+            "monitor": self._monitor.snapshot(),
             "demands": [demand.__dict__ if hasattr(demand, "__dict__") else {
                 "demand_id": demand.demand_id, "task_id": demand.task_id,
                 "family": demand.family, "signal": demand.signal,
@@ -842,6 +873,18 @@ class SEMMethodSession:
             )
             for row in data["evidence"]
         ]
+        self._journal = EvidenceJournal()
+        self._journal.restore(memory_events=self._evidence)
+        for row in data.get("audit_evidence", []):
+            self._journal.append(
+                EvidenceEvent(
+                    str(row["evidence_id"]), str(row["task_id"]), str(row["family"]),
+                    dict(row["payload"]), str(row["source"]), str(row["generation"]),
+                    str(row["digest"]),
+                ),
+                channel="audit",
+            )
+        self._monitor.restore(dict(data.get("monitor", {})))
         self._graph.restore(self._snapshot_from_dict(data["graph"]))
         self._demands = [
             StructuralDemand(
@@ -899,6 +942,8 @@ class SEMMethodSession:
             "memory_queries": self._queries,
             "completed_task_count": len(self._completed),
             "structural_mismatch_count": self._mismatch_count,
+            "audit_evidence_count": len(self._journal.audit_events),
+            **self._monitor.diagnostics(),
             "candidate_count": self._candidate_count,
             "adopted_count": self._adopted_count,
             "rejected_count": self._rejected_count,

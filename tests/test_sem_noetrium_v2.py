@@ -200,3 +200,29 @@ def test_sem_uses_public_noetrium_memory_graph_facade() -> None:
 
     session = SEMMethodSession(session_id="public-contract", treatment_id="sem", seed="run")
     assert isinstance(session._graph, VersionedMemoryGraph)
+
+
+def test_memory_and_audit_evidence_are_disjoint() -> None:
+    session = SEMMethodSession(session_id="channels", treatment_id="sem", seed="run")
+    session.ingest({"task_id": "memory", "fact": "visible"}, None)
+    audit_id = session.record_audit(
+        {"task_id": "audit", "success": True, "heldout": "never-memory"}
+    )
+    assert audit_id not in {item.evidence_id for item in session._evidence}
+    assert session.diagnostics()["audit_evidence_count"] == 1
+    assert "never-memory" not in session.recall(
+        RecallRequest("heldout", None)
+    ).context_text
+
+
+def test_monitor_state_is_checkpointed() -> None:
+    session = SEMMethodSession(session_id="monitor", treatment_id="sem", seed="run")
+    session.task_completed(_failure("failed", "precondition_missing"), None)
+    snapshot = session.checkpoint()
+    restored = SEMMethodSession(session_id="monitor", treatment_id="sem", seed="run")
+    restored.restore(snapshot)
+    assert restored.diagnostics()["opportunity_count"] == 1
+    assert (
+        restored.diagnostics()["monitor_query_count"]
+        == session.diagnostics()["monitor_query_count"]
+    )
