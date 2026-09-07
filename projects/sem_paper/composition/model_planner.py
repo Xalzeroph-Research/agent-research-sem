@@ -85,7 +85,7 @@ class ModelActionPlanner:
             "Use only the allowed action types and at most max_steps actions. "
             "Arguments must be concrete JSON values. Prefer short sequences and "
             "respect the observed inventory; historical memory is advisory and "
-            "may be stale. Output exactly {"actions":[...]}.\n\n"
+            "may be stale. Output exactly {\"actions\":[...]}.\n\n"
             f"Task: {json.dumps(task_view, sort_keys=True, ensure_ascii=False)}\n"
             f"Current snapshot: {json.dumps(dict(snapshot), sort_keys=True, ensure_ascii=False)}\n"
             f"Historical memory: {memory_context[:12000]}\n"
