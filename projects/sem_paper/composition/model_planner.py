@@ -7,6 +7,13 @@ import re
 import urllib.request
 from typing import Any, Mapping
 
+from noetrium.contracts import canonical_digest
+from noetrium.contracts.systems.model__request import (
+    ExecutionContext,
+    ImmutableModelIdentity,
+    ModelRequestRecorderPort,
+)
+
 ALLOWED_ACTIONS = frozenset({
     "collect_block", "craft_item", "smelt_item", "place_block",
     "move_away", "goto", "defend_self", "observe_entities", "wait",
@@ -36,8 +43,18 @@ class ModelPlannerConfig:
 class ModelActionPlanner:
     """Bounded JSON planner; it owns no memory and no environment semantics."""
 
-    def __init__(self, config: ModelPlannerConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ModelPlannerConfig | None = None,
+        *,
+        request_recorder: ModelRequestRecorderPort | None = None,
+        request_context: ExecutionContext | None = None,
+        model_identity: ImmutableModelIdentity | None = None,
+    ) -> None:
         self.config = config or ModelPlannerConfig.from_env()
+        self.request_recorder = request_recorder
+        self.request_context = request_context
+        self.model_identity = model_identity
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -63,6 +80,23 @@ class ModelActionPlanner:
                 {"role": "user", "content": self._prompt(task, memory_context, snapshot)},
             ],
         }
+        if (
+            self.request_recorder is not None
+            and self.request_context is not None
+            and self.model_identity is not None
+        ):
+            prompt_text = self._prompt(task, memory_context, snapshot)
+            self.request_recorder.record(
+                request_id=f"sem-model-request-{self.calls}",
+                context=self.request_context,
+                role="planner",
+                model=self.model_identity,
+                prompt_generation_id="sem-planner",
+                prompt_id="minecraft-task-planner",
+                prompt_digest=canonical_digest(prompt_text),
+                request_body=payload,
+                compiled_prompt_text=prompt_text,
+            )
         request = urllib.request.Request(
             self.config.base_url + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -101,10 +135,13 @@ class ModelActionPlanner:
     def _parse_actions(content: str, max_steps: int) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
         text = re.sub(r"<think>.*?</think>", "", str(content), flags=re.DOTALL).strip()
         text = re.sub(r"^\x60{3}(?:json)?\s*|\s*\x60{3}$", "", text, flags=re.IGNORECASE).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
+        start = text.find("{")
+        if start < 0:
             raise ValueError("model planner did not return a JSON object")
-        document = json.loads(text[start:end + 1])
+        try:
+            document, _ = json.JSONDecoder().raw_decode(text[start:])
+        except json.JSONDecodeError as exc:
+            raise ValueError("model planner did not return a valid JSON object") from exc
         rows = document.get("actions") if isinstance(document, Mapping) else None
         if not isinstance(rows, list):
             raise ValueError("model planner response must contain an actions array")

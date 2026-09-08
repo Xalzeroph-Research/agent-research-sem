@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import hashlib
 import json
 import os
@@ -20,6 +19,7 @@ from noetrium.contracts import (
     EnvironmentCapability,
     EnvironmentIdentity,
     EnvironmentProviderCapabilities,
+    EnvironmentSession,
     MethodTaskOutcome,
     Observation,
     RecallRequest,
@@ -27,10 +27,13 @@ from noetrium.contracts import (
     canonical_digest,
 )
 
-from noetrium.contracts.systems.environment__minecraft import (
-    MinecraftBridgeCommandResult,
-    MinecraftBridgePort,
+from noetrium.contracts.systems.model__request import (
+    ExecutionContext,
+    ImmutableModelIdentity,
+    ModelRequestRecorderPort,
 )
+
+from noetrium.platform import bind_bundled_minecraft_environment
 
 from projects.sem_paper.experiments.protocol import load_task_manifest
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
@@ -109,7 +112,6 @@ class _ScriptedMinecraftSession:
         return canonical_bytes({"session_id": self.session_id, "step": self._step})
 
     def restore(self, payload: bytes) -> None:
-        import json
         value = json.loads(payload.decode("utf-8"))
         if value["session_id"] != self.session_id:
             raise ValueError("environment snapshot identity mismatch")
@@ -255,181 +257,6 @@ class ScriptedMinecraftEnvironment:
         )
 
 
-class _MinecraftBridgeClient:
-    def __init__(self, run_identity: str) -> None:
-        self.run_identity = run_identity
-        self.node = os.environ.get("MC_NODE", "/usr/local/bin/node")
-        self.script = os.environ.get(
-            "MC_BRIDGE_SCRIPT",
-            "/opt/noetrium/noetrium_platform/capabilities/environment/minecraft/providers/assets/mineflayer_bridge/bridge.js",
-        )
-        self.host = os.environ.get("MC_HOST", "127.0.0.1")
-        self.port = int(os.environ.get("MC_PORT", "25565"))
-        self.version = os.environ.get("MC_VERSION", "1.21.1")
-        self.username = os.environ.get("MC_USERNAME", "ResearchBot")
-        self.recovery_dir = os.environ.get(
-            "MC_ACTION_RECOVERY_DIR", "/var/lib/noetrium/action-recovery"
-        )
-        self.process: subprocess.Popen[str] | None = None
-        self._counter = 0
-
-    @property
-    def action_recovery_durability(self) -> str:
-        return "durable"
-
-    def configure_action_recovery(self, namespace: str) -> None:
-        if not namespace.strip():
-            raise ValueError("Minecraft action-recovery namespace is required")
-        self.recovery_dir = namespace
-
-    def supports_command(self, command: str) -> bool:
-        return bool(command.strip())
-
-    def command(
-        self,
-        command: str,
-        payload: Mapping[str, Any],
-        *,
-        timeout_s: float,
-    ) -> MinecraftBridgeCommandResult:
-        if not self.supports_command(command):
-            raise ValueError("Minecraft bridge command is required")
-        event_kind = str(payload.get("_wait_kind", "action_result"))
-        request_payload = {
-            key: value for key, value in payload.items() if key != "_wait_kind"
-        }
-        ack, events = self._request(
-            {"cmd": command, **request_payload},
-            wait_kinds=frozenset({event_kind}),
-            timeout_s=timeout_s,
-        )
-        event = events.get(event_kind, {})
-        event_payload = event.get("payload", event)
-        diagnostics = dict(event_payload) if isinstance(event_payload, Mapping) else {}
-        verified = diagnostics.get("verified")
-        return MinecraftBridgeCommandResult(
-            command=command,
-            acknowledged=bool(ack.get("accepted", ack.get("ok", True))),
-            verified=bool(verified) if verified is not None else None,
-            diagnostics=diagnostics,
-        )
-
-    def _request(
-        self,
-        payload: dict[str, Any],
-        *,
-        wait_kinds: frozenset[str] = frozenset(),
-        timeout_s: float = 90.0,
-    ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-        if self.process is None or self.process.stdin is None or self.process.stdout is None:
-            raise RuntimeError("Minecraft bridge is not running")
-        self._counter += 1
-        request_id = f"{self.run_identity}-request-{self._counter}"
-        message = {**payload, "request_id": request_id}
-        self.process.stdin.write(json.dumps(message, sort_keys=True) + "\n")
-        self.process.stdin.flush()
-        ack: dict[str, Any] | None = None
-        events: dict[str, dict[str, Any]] = {}
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            line = self.process.stdout.readline()
-            if not line:
-                stderr = self.process.stderr.read() if self.process.stderr else ""
-                raise RuntimeError(f"Minecraft bridge exited: {stderr[-1000:]}")
-            value = json.loads(line)
-            if value.get("request_id") != request_id:
-                continue
-            if value.get("type") == "event":
-                events[str(value.get("kind"))] = value
-            elif value.get("type") == "ack":
-                ack = value
-            if ack is not None and wait_kinds.issubset(events):
-                return ack, events
-        raise TimeoutError(f"Minecraft bridge request timed out: {payload.get('cmd')}")
-
-    def start(self) -> None:
-        self.process = subprocess.Popen(
-            [self.node, self.script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        ack, _ = self._request(
-            {
-                "cmd": "connect",
-                "host": self.host,
-                "port": self.port,
-                "username": self.username,
-                "auth": "offline",
-                "version": self.version,
-                "action_recovery_dir": self.recovery_dir,
-            },
-            wait_kinds=frozenset({"bridge_status", "self_snapshot"}),
-            timeout_s=90.0,
-        )
-        if ack.get("verified") is False:
-            raise RuntimeError(str(ack.get("error") or ack))
-
-    def snapshot(self) -> dict[str, Any]:
-        result = self.command(
-            "snapshot",
-            {"_wait_kind": "self_snapshot"},
-            timeout_s=90.0,
-        )
-        payload = result.diagnostics
-        if not isinstance(payload, dict):
-            raise RuntimeError("Minecraft bridge returned malformed self_snapshot")
-        return dict(payload)
-
-    def action(
-        self,
-        *,
-        task_id: str,
-        task_lineage: str,
-        action_type: str,
-        arguments: Mapping[str, Any],
-        timeout_s: float,
-    ) -> dict[str, Any]:
-        self._counter += 1
-        action_id = f"{self.run_identity}-action-{self._counter}"
-        request = {
-            "cmd": action_type,
-            "action_id": action_id,
-            "task_id": task_id,
-            "task_lineage": task_lineage,
-            "task": task_id,
-            **dict(arguments),
-            "_action_timeout_ms": max(1000, int(timeout_s * 1000)),
-        }
-        request["_request_digest"] = hashlib.sha256(
-            canonical_bytes(request)
-        ).hexdigest()
-        result = self.command(
-            action_type,
-            {**request, "_wait_kind": "action_result"},
-            timeout_s=max(90.0, timeout_s + 30.0),
-        )
-        if not isinstance(result.diagnostics, Mapping):
-            raise RuntimeError("Minecraft bridge returned malformed action_result")
-        return dict(result.diagnostics)
-
-    def close(self) -> None:
-        if self.process is None:
-            return
-        try:
-            self._request({"cmd": "quit"}, timeout_s=5.0)
-        except Exception:
-            self.process.terminate()
-        finally:
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            self.process = None
-
-
 class RealMinecraftEnvironment:
     """Real Mineflayer-backed SEM environment.
 
@@ -439,7 +266,14 @@ class RealMinecraftEnvironment:
 
     environment_id = "minecraft.mineflayer.jsonl.v1"
 
-    def __init__(self, execution_run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        execution_run_id: str | None = None,
+        *,
+        model_request_recorder: ModelRequestRecorderPort | None = None,
+        model_context: ExecutionContext | None = None,
+        model_identity: ImmutableModelIdentity | None = None,
+    ) -> None:
         self.execution_run_id = (
             execution_run_id
             or os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -447,6 +281,9 @@ class RealMinecraftEnvironment:
         )
         if not self.execution_run_id:
             raise ValueError("SEM execution run identity is required")
+        self.model_request_recorder = model_request_recorder
+        self.model_context = model_context
+        self.model_identity = model_identity
 
     @property
     def identity(self) -> EnvironmentIdentity:
@@ -467,7 +304,11 @@ class RealMinecraftEnvironment:
 
     @property
     def capabilities(self) -> EnvironmentProviderCapabilities:
-        return EnvironmentProviderCapabilities.fully_recoverable()
+        return EnvironmentProviderCapabilities((
+            EnvironmentCapability.RECONCILE,
+            EnvironmentCapability.DIAGNOSTICS,
+            EnvironmentCapability.QUERY,
+        ))
 
     def run_suite(
         self,
@@ -487,27 +328,47 @@ class RealMinecraftEnvironment:
         recovery_root = os.environ.get(
             "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
         )
-        recovery_dir = os.path.join(recovery_root, run_identity)
-        try:
-            Path(recovery_dir).mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise RuntimeError(
-                f"Minecraft assignment recovery directory is not writable: {recovery_dir}"
-            ) from exc
-        bridge = _MinecraftBridgeClient(run_identity=run_identity)
-        bridge.recovery_dir = recovery_dir
-        bridge.start()
-        planner = (
-            ModelActionPlanner()
-            if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model"
-            else None
+        binding = bind_bundled_minecraft_environment(
+            host=os.environ.get("MC_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MC_PORT", "25565")),
+            username=os.environ.get("MC_USERNAME", "ResearchBot"),
+            auth=os.environ.get("MC_AUTH", "offline"),
+            version=os.environ.get("MC_VERSION", "1.21.1"),
+            node_executable=os.environ.get("MC_NODE") or None,
+            action_recovery_root=recovery_root,
+            connect_timeout_s=float(os.environ.get("MC_CONNECT_TIMEOUT_S", "90")),
+            command_timeout_s=float(os.environ.get("MC_COMMAND_TIMEOUT_S", "90")),
+            task_group_id=f"sem-minecraft-{run_identity}",
         )
-        results: list[EnvironmentTaskResult] = []
         try:
+            environment_session = binding.open_session(
+                session_id=run_identity,
+                services=object(),
+            )
+            planner = (
+                ModelActionPlanner(
+                    request_recorder=self.model_request_recorder,
+                    request_context=self.model_context,
+                    model_identity=self.model_identity,
+                )
+                if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model"
+                else None
+            )
+            results: list[EnvironmentTaskResult] = []
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
                 started = time.monotonic()
-                snapshot = bridge.snapshot()
+                context = self._execution_context(
+                    run_identity=run_identity,
+                    task_id=task_id,
+                    ordinal=ordinal,
+                    environment_generation=binding.identity.artifact_digest,
+                    assignment=assignment,
+                )
+                observation = environment_session.observe(context)
+                if not isinstance(observation.payload, Mapping):
+                    raise RuntimeError("Noetrium Minecraft observation payload is not a mapping")
+                snapshot = dict(observation.payload)
                 agent_observation = AgentObservation(
                     f"{task_id}:observation:{ordinal}",
                     f"{variant_id}:{ordinal}",
@@ -541,8 +402,12 @@ class RealMinecraftEnvironment:
                 else:
                     plan = load_scripted_action_plan(task)
                 task_results = self._run_real_task(
-                    bridge, task, task_id,
-                    str(task.get("lineage_id", canonical_digest(task))), plan
+                    environment_session,
+                    context,
+                    task,
+                    task_id,
+                    str(task.get("lineage_id", canonical_digest(task))),
+                    plan,
                 )
                 success, failure_class = self._validate_task(task, task_results)
                 steps = len(task_results)
@@ -622,7 +487,47 @@ class RealMinecraftEnvironment:
                 )
             return tuple(results)
         finally:
-            bridge.close()
+            binding.close()
+
+    @staticmethod
+    def _execution_context(
+        *,
+        run_identity: str,
+        task_id: str,
+        ordinal: int,
+        environment_generation: str,
+        assignment: object | None,
+    ) -> ExecutionContext:
+        study_id = getattr(assignment, "study_id", None)
+        return ExecutionContext(
+            run_id=run_identity,
+            trace_id=run_identity,
+            span_id=f"{run_identity}:{task_id}:{ordinal}",
+            study_id=str(study_id) if study_id is not None else None,
+            task_id=task_id,
+            decision_cycle_id=f"{task_id}:{ordinal}",
+            participant_generations=(("environment", environment_generation),),
+        )
+
+    @staticmethod
+    def _action_event_payload(result: ActionResult) -> dict[str, Any]:
+        observation = result.observation
+        if observation is None or not isinstance(observation.payload, Mapping):
+            raise RuntimeError("Noetrium Minecraft action returned no grounded observation")
+        events = observation.payload.get("events", ())
+        if not isinstance(events, (list, tuple)):
+            raise RuntimeError("Noetrium Minecraft action observation has malformed events")
+        for event in reversed(events):
+            if not isinstance(event, Mapping) or event.get("kind") != "action_result":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, Mapping):
+                raise RuntimeError("Noetrium Minecraft action_result payload is malformed")
+            materialized = dict(payload)
+            materialized.setdefault("verified", result.diagnostics.get("verified"))
+            materialized.setdefault("accepted", result.accepted)
+            return materialized
+        raise RuntimeError("Noetrium Minecraft action returned no action_result event")
 
     def _reset_assignment_world(self, session_id: str) -> None:
         command = os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
@@ -677,7 +582,8 @@ class RealMinecraftEnvironment:
 
     def _run_real_task(
         self,
-        bridge: _MinecraftBridgeClient,
+        environment_session: EnvironmentSession,
+        context: ExecutionContext,
         task: Mapping[str, Any],
         task_id: str,
         task_lineage: str,
@@ -714,16 +620,25 @@ class RealMinecraftEnvironment:
                 ("collect_block", {"block": "iron_ore", "count": 1, "max_distance": 64}, 240.0),
                 ("craft_item", {"item": "shield", "count": 1}, 120.0),
             ]
-        return [
-            bridge.action(
-                task_id=task_id,
-                task_lineage=task_lineage,
-                action_type=action_type,
-                arguments=arguments,
-                timeout_s=timeout_s,
+        results: list[dict[str, Any]] = []
+        for action_ordinal, (action_type, arguments, _planner_timeout_s) in enumerate(actions):
+            action_context = context.child(
+                span_id=f"{context.span_id}:action:{action_ordinal}",
+                operation_id=f"minecraft:{action_type}:{action_ordinal}",
             )
-            for action_type, arguments, timeout_s in actions
-        ]
+            result = environment_session.act(
+                ActionRequest(
+                    action_id=f"{context.run_id}:{task_id}:action:{action_ordinal}",
+                    action_type=action_type,
+                    payload=dict(arguments),
+                    context=action_context,
+                )
+            )
+            materialized = self._action_event_payload(result)
+            materialized.setdefault("task_id", task_id)
+            materialized.setdefault("task_lineage", task_lineage)
+            results.append(materialized)
+        return results
 
 
 __all__ = ["EnvironmentTaskResult", "ScriptedMinecraftEnvironment", "RealMinecraftEnvironment"]

@@ -83,6 +83,28 @@ def test_model_planner_parser_is_bounded_and_hides_fixture_plan() -> None:
     assert plan[0][2] == 5.0
 
 
+
+
+def test_model_planner_recovers_first_complete_json_object_with_trailing_brace() -> None:
+    plan = ModelActionPlanner._parse_actions(
+        '{"actions":[{"action":{"count":16,"tool":"move_away"}},'
+        '{"action":{"count":5,"tool":"move_away"}},'
+        '{"action":{"tool":"goto","position":{"x":6.5,"y":66,"z":13.3}}}]}}',
+        max_steps=4,
+    )
+    assert [row[0] for row in plan] == ["move_away", "move_away", "goto"]
+    assert plan[0][1] == {"count": 16}
+    assert plan[2][1]["position"] == {"x": 6.5, "y": 66, "z": 13.3}
+
+
+def test_model_planner_accepts_json_after_non_json_prefix_and_ignores_suffix() -> None:
+    plan = ModelActionPlanner._parse_actions(
+        'planner-output: {"actions":[{"action_type":"wait","arguments":{}}]} trailing',
+        max_steps=1,
+    )
+    assert plan == (("wait", {}, 90.0),)
+
+
 def test_model_planner_rejects_unsupported_actions() -> None:
     try:
         ModelActionPlanner._parse_actions(
