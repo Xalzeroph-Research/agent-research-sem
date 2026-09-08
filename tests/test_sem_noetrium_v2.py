@@ -123,6 +123,35 @@ def test_sem_supports_split_merge_and_retire() -> None:
     assert session.diagnostics()["rejected_count"] == 0
 
 
+def test_sem_recall_materializes_selected_graph_node_instead_of_global_evidence() -> None:
+    session = SEMMethodSession(
+        session_id="architecture-recall", treatment_id="sem", seed="run"
+    )
+    session.task_completed(
+        _failure("first", "precondition_missing"), {"task_id": "first"}
+    )
+    semantic = next(
+        node for node in session._graph.snapshot().nodes
+        if node.node_id.startswith("semantic:")
+    )
+    session.ingest(
+        {
+            "task_id": "later",
+            "family": "resource",
+            "success": False,
+            "failure_reason": "precondition_missing",
+            "marker": "later-not-backfilled",
+        },
+        None,
+    )
+
+    result = session.recall(RecallRequest("precondition_missing", None))
+
+    assert result.artifacts
+    assert set(result.artifacts).issubset(set(semantic.evidence_ids))
+    assert "later-not-backfilled" not in result.context_text
+
+
 def test_checkpoint_restore_preserves_semantic_state() -> None:
     session = SEMMethodSession(session_id="restore", treatment_id="sem", seed="run")
     session.task_completed(_failure("failed", "timeout"), {"task_id": "failed"})

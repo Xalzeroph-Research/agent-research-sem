@@ -386,21 +386,95 @@ class SEMMethodSession:
         event = self._record_evidence(payload, source="environment")
         self._route_evidence(event)
 
+    @staticmethod
+    def _node_descriptor_text(node: MemoryNodeRecord) -> str:
+        return " ".join((
+            node.node_id,
+            node.kind,
+            node.label,
+            node.content,
+            node.purpose,
+            node.scope,
+            node.mode,
+            " ".join(node.access),
+            " ".join(node.sources),
+            json.dumps(dict(node.schema), sort_keys=True, ensure_ascii=False, default=str),
+            json.dumps(dict(node.transform), sort_keys=True, ensure_ascii=False, default=str),
+        ))
+
+    def _materialize_node_evidence(
+        self,
+        node: MemoryNodeRecord,
+        evidence_by_id: Mapping[str, EvidenceEvent],
+    ) -> tuple[EvidenceEvent, ...]:
+        materialized = tuple(
+            evidence_by_id[evidence_id]
+            for evidence_id in node.evidence_ids
+            if evidence_id in evidence_by_id
+        )
+        if node.mode == "CURRENT":
+            return materialized[-1:]
+        return materialized
+
     def recall(self, request: RecallRequest) -> RecallResult:
         self._ensure_open()
         self._queries += 1
         if self.treatment_id == "no_memory":
             return RecallResult("", self.generation, ())
+
         query = _tokens(str(request.intent))
-        selected: list[tuple[int, int, EvidenceEvent]] = []
-        for index, event in enumerate(self._evidence):
-            text = self._payload_text(event.payload)
-            overlap = len(query & _tokens(text + " " + event.family))
-            recency = min(index, 20)
-            selected.append((overlap * 10 + recency, index, event))
-        selected.sort(key=lambda item: (-item[0], -item[1]))
+        evidence_by_id = {event.evidence_id: event for event in self._evidence}
+        ranked_nodes: list[tuple[int, int, int, int, MemoryNodeRecord, tuple[EvidenceEvent, ...]]] = []
+        for node_index, node in enumerate(self._graph.snapshot().nodes):
+            if not node.active or "MEMORY_ASK" not in node.access:
+                continue
+            materialized = self._materialize_node_evidence(node, evidence_by_id)
+            if not materialized:
+                continue
+            descriptor_overlap = len(query & _tokens(self._node_descriptor_text(node)))
+            evidence_overlap = max(
+                (
+                    len(query & _tokens(self._payload_text(event.payload) + " " + event.family))
+                    for event in materialized
+                ),
+                default=0,
+            )
+            score = descriptor_overlap * 100 + evidence_overlap * 10
+            ranked_nodes.append((
+                score, descriptor_overlap, evidence_overlap, node_index, node, materialized
+            ))
+
+        ranked_nodes.sort(key=lambda item: (-item[0], -item[1], -item[2], item[3]))
+        if not ranked_nodes:
+            self._monitor.record_query(hit=False)
+            return RecallResult("", self.generation, ())
+
+        top_score = ranked_nodes[0][0]
+        selected_nodes = [
+            item for item in ranked_nodes
+            if item[0] == top_score
+        ]
+        if top_score == 0:
+            selected_nodes = selected_nodes[:1]
+
+        evidence_index = {event.evidence_id: index for index, event in enumerate(self._evidence)}
+        selected: dict[str, tuple[int, int, EvidenceEvent]] = {}
+        for node_score, _descriptor_overlap, _evidence_overlap, _node_index, _node, events in selected_nodes:
+            for event in events:
+                text = self._payload_text(event.payload)
+                overlap = len(query & _tokens(text + " " + event.family))
+                recency = evidence_index.get(event.evidence_id, -1)
+                rank = node_score * 1000 + overlap * 10 + min(max(recency, 0), 20)
+                current = selected.get(event.evidence_id)
+                if current is None or rank > current[0]:
+                    selected[event.evidence_id] = (rank, recency, event)
+
+        ranked_evidence = sorted(
+            selected.values(),
+            key=lambda item: (-item[0], -item[1], item[2].evidence_id),
+        )
         limit = max(1, int(request.limit))
-        chosen = [item[2] for item in selected[:limit]]
+        chosen = [item[2] for item in ranked_evidence[:limit]]
         self._monitor.record_query(hit=bool(chosen))
         return RecallResult(
             "\n".join(self._payload_text(item.payload) for item in chosen),
