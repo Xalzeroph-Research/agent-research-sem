@@ -107,6 +107,20 @@ policy remains downstream. Method endpoint binding and deployment-owned host
 commands now enter through noetrium.platform; SEM does not import private
 noetrium_platform runtime factories or call subprocess directly.
 
+The public high-level Agent host is
+`noetrium.platform.bind_agent_research_runtime`. It composes the existing
+Noetrium cognition loop from SEM- or provider-owned observation, planner,
+skill, action, memory, safety, completion, evidence, progress, and diagnostic
+ports. Multimodal SEM variants may wrap the observation port with
+`noetrium.platform.MultimodalAgentObservationPort`; the part source and model
+codec remain provider-owned, so this seam supports arbitrary modality sets and
+method schemas.
+
+The runner uses noetrium.platform.bind_study_matrix_execution for study matrix
+scheduling, and model planners use noetrium.platform.complete_project_model for
+request recording and response provenance. These are upstream mechanics; SEM
+retains task semantics, prompts, action vocabulary, and result interpretation.
+
 If a required capability is absent from the public Noetrium contract, the
 issue is upstream. Add or repair the Noetrium public API and regenerate the
 downstream facade before changing SEM to use a private path. If the public

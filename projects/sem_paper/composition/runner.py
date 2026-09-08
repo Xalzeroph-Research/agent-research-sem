@@ -8,7 +8,6 @@ from typing import Callable
 from uuid import uuid4
 
 from noetrium.contracts import (
-    BasicStudyMetricAggregator,
     BoundStudyUnitExecutionPort,
     EnvironmentAssignmentIdentity,
     EnvironmentAssignmentIsolationPort,
@@ -16,13 +15,15 @@ from noetrium.contracts import (
     ExperimentPlan,
     StudyExecutionUnit,
     StudyMatrixExecutionReport,
-    StudyMatrixExecutor,
     StudyMetricObservation,
     VariantBinding,
     canonical_digest,
 )
 from noetrium.contracts.systems.experimentation__run import RunArtifactKind
-from noetrium.platform import bind_directory_run_artifact_store
+from noetrium.platform import (
+    bind_directory_run_artifact_store,
+    bind_study_matrix_execution,
+)
 
 from projects.sem_paper.composition.environment import (
     RealMinecraftEnvironment,
@@ -53,9 +54,11 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
     ] | None = None
 
     def run(self, assignments=None) -> StudyMatrixExecutionReport:
-        executor = StudyMatrixExecutor(BasicStudyMetricAggregator())
         selected = self.plan.assignments if assignments is None else tuple(assignments)
-        return executor.execute_plan(self.plan, selected, self)
+        with bind_study_matrix_execution(
+            task_group_id=f"sem-study-{self.plan.plan_digest[:16]}",
+        ) as binding:
+            return binding.execute_plan(self.plan, selected, self)
 
     def execute_bound(
         self,

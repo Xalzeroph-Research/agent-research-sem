@@ -9,13 +9,13 @@ from typing import Any, Mapping
 from noetrium.contracts import (
     ModelCapabilityRequirement,
     ProjectModelClientPort,
-    ProjectModelRequest,
     canonical_digest,
 )
 from noetrium.contracts.systems.model__request import (
     ExecutionContext,
     ModelRequestRecorderPort,
 )
+from noetrium.platform import complete_project_model
 
 ALLOWED_ACTIONS = frozenset({
     "collect_block", "craft_item", "smelt_item", "place_block",
@@ -113,23 +113,13 @@ class ModelActionPlanner:
                 {"role": "user", "content": prompt_text},
             ],
         }
-        envelope = self.request_recorder.record(
+        response = complete_project_model(
+            self.client,
+            self.request_recorder,
             request_id=f"{context.run_id}:sem-planner:{self.calls}",
             context=context,
-            role=PLANNER_ROLE,
-            model=self.client.binding.model,
-            prompt_generation_id=PLANNER_PROMPT_GENERATION_ID,
-            prompt_id=PLANNER_PROMPT_ID,
-            prompt_digest=PLANNER_PROMPT_DIGEST,
             request_body=payload,
             compiled_prompt_text=prompt_text,
-        )
-        response = self.client.complete(
-            ProjectModelRequest(
-                self.client.binding.requirement_digest,
-                envelope,
-                payload,
-            )
         )
         self.prompt_tokens += int(response.input_tokens or 0)
         self.completion_tokens += int(response.output_tokens or 0)

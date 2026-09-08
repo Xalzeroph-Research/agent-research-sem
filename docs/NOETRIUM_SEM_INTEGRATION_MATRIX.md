@@ -4,7 +4,7 @@ Date: 2026-09-08
 
 This document records the capability review performed against the Noetrium
 public downstream catalog and the SEM canonical branch. The catalog currently
-contains 166 registered system surfaces. Registration is not the same as
+contains 172 registered system surfaces. Registration is not the same as
 scientific adoption: SEM must use a public contract where Noetrium owns the
 generic lifecycle, and must keep scientific memory semantics downstream.
 
@@ -26,6 +26,8 @@ contract is absent, the issue is upstream and must be fixed in Noetrium first.
 | --- | --- | --- | --- |
 | Method identity/session/outcome | participant/method + noetrium.platform.bind_method_endpoint | Complete: SEM opens through the public facade | Keep the method ABI and typed services |
 | Agent cognition memory seam | participant/agent / AgentMemoryPort | Adapter now implements checkpoint/restore and is wired into environment calls | Use SemMethodAgentMemoryAdapter for all memory treatments except no_memory |
+| Agent research runtime composition | noetrium.platform.bind_agent_research_runtime | Available upstream; SEM's current method session remains a valid whole-method path, while the generic cognition host is available for new agent variants | Migrate only when the live method ports are explicitly bound; do not duplicate the loop |
+| Generic multimodal observation and serving | noetrium.platform.MultimodalAgentObservationPort; noetrium.platform.invoke_multimodal_model; model multimodal contracts | Open-world observation and provider-codec invocation are available upstream; SEM has not enabled a live multimodal task variant | Add a provider-owned part source/codec and typed response decoder for the selected paper method; do not hard-code a VLM format |
 | Typed memory graph substrate | components / noetrium.contracts.systems.components | Used through the public facade | Populate typed node metadata; keep semantic policy in SEM |
 | Typed node metadata | MemoryNodeRecord fields purpose/scope/mode/schema/access/sources/transform/maintenance_contract/provenance | Upstream public contract now available in af9ec480 | SEM constructors and edit materialization must preserve every field |
 | Environment and Minecraft | environment/*, especially environment/minecraft | Generic action/observation/effect types are used; provider lifecycle is Noetrium-bound and assignment reset enters through noetrium.platform.run_local_shell_command | Bind world cut/branch, readiness, and effect receipts through the live Noetrium deployment |
@@ -34,7 +36,7 @@ contract is absent, the issue is upstream and must be fixed in Noetrium first.
 | External effect and recovery | reliability/effect, recovery, forensics | SEM has evidence and bridge recovery logic, but not the generic effect/recovery ports | Route action receipts and uncertain effects through Noetrium; keep SEM evidence interpretation downstream |
 | Persistent server/session runtime | runtime/session, runtime/server/* | Not called by SEM core or runner | Inject the runtime composition; SEM must not call tmux directly |
 | Process/toolchain/Python execution | runtime/process, runtime/toolchain, runtime/python | SEM has no direct subprocess call; deployment-owned reset uses the public Noetrium host-command facade, while full lifecycle remains provider composition | Inject the Noetrium process/runtime binding for deployment lifecycle actions |
-| Model request/serving/deployment | model/request, model/serving, model/deployment | Planner uses a direct HTTP request path | Adapt planner to the typed model request/serving boundary |
+| Model request/serving/deployment | model/request, model/serving, model/deployment | Planner uses Noetrium's qualified model client and complete_project_model facade | Keep method-owned prompt/body semantics downstream; Noetrium owns request recording, endpoint invocation, and provenance fencing |
 | Observability and telemetry | observability/* | SEM exposes semantic diagnostics; assignment results are sealed through the Noe artifact store | Publish lifecycle/diagnostic facts through Noetrium observation ports |
 | Artifact/data/lineage | artifact/*, data/* | Assignment results now use Noe durable artifact store and finalization/verification; semantic evidence remains SEM-owned | Publish complete evidence/lineage manifests through the run authority |
 | Governance/gates | governance/gate, governance/quality, governance/evolution | SEM owns proposal-blind scientific gate | Keep scientific gate downstream; use generic platform gates for composition and release checks |
