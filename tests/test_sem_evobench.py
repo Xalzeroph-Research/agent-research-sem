@@ -106,16 +106,28 @@ def test_model_planner_parser_is_bounded_and_hides_fixture_plan() -> None:
 
 
 
-def test_model_planner_recovers_first_complete_json_object_with_trailing_brace() -> None:
-    plan = ModelActionPlanner._parse_actions(
-        '{"actions":[{"action":{"count":16,"tool":"move_away"}},'
-        '{"action":{"count":5,"tool":"move_away"}},'
-        '{"action":{"tool":"goto","position":{"x":6.5,"y":66,"z":13.3}}}]}}',
-        max_steps=4,
-    )
-    assert [row[0] for row in plan] == ["move_away", "move_away", "goto"]
-    assert plan[0][1] == {"count": 16}
-    assert plan[2][1]["position"] == {"x": 6.5, "y": 66, "z": 13.3}
+def test_model_planner_rejects_noncanonical_args_alias() -> None:
+    try:
+        ModelActionPlanner._parse_actions(
+            '{"actions":[{"action_type":"goto","args":'
+            '{"position":{"x":9.5,"y":72,"z":168.5},"radius":5}}]}',
+            max_steps=2,
+        )
+    except ValueError as exc:
+        assert "canonical arguments object" in str(exc)
+    else:
+        raise AssertionError("non-canonical args alias was accepted")
+
+def test_model_planner_rejects_noncanonical_nested_action_shape() -> None:
+    try:
+        ModelActionPlanner._parse_actions(
+            '{"actions":[{"action":{"tool":"move_away","distance":8}}]}',
+            max_steps=4,
+        )
+    except ValueError as exc:
+        assert "action_type must be a non-empty string" in str(exc)
+    else:
+        raise AssertionError("nested action shape was accepted")
 
 
 def test_model_planner_accepts_json_after_non_json_prefix_and_ignores_suffix() -> None:
@@ -123,7 +135,7 @@ def test_model_planner_accepts_json_after_non_json_prefix_and_ignores_suffix() -
         'planner-output: {"actions":[{"action_type":"wait","arguments":{}}]} trailing',
         max_steps=1,
     )
-    assert plan == (("wait", {}, 90.0),)
+    assert plan == (("wait", {"ms": 500}, 90.0),)
 
 
 def test_model_planner_rejects_unsupported_actions() -> None:
@@ -239,7 +251,7 @@ def test_model_planner_uses_typed_client_and_stable_prompt_identity() -> None:
         context=second_context,
     )
 
-    assert first == second == (("wait", {}, 90.0),)
+    assert first == second == (("wait", {"ms": 500}, 90.0),)
     assert len(client.requests) == 2
     assert [row["prompt_digest"] for row in recorder.records] == [
         PLANNER_PROMPT_DIGEST, PLANNER_PROMPT_DIGEST

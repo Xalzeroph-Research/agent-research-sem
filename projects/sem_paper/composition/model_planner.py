@@ -11,6 +11,10 @@ from noetrium.contracts import (
     ProjectModelClientPort,
     canonical_digest,
 )
+from noetrium.contracts.systems.environment__minecraft import (
+    MinecraftActionContractError,
+    validate_minecraft_action,
+)
 from noetrium.contracts.systems.model__request import (
     ExecutionContext,
     ModelRequestRecorderPort,
@@ -136,7 +140,9 @@ class ModelActionPlanner:
         return (
             "Plan the next bounded action sequence for this Minecraft task. "
             "Use only the allowed action types and at most max_steps actions. "
-            "Arguments must be concrete JSON values. Prefer short sequences and "
+            "Each action must use exactly the canonical envelope "
+            "{\"action_type\":\"...\",\"arguments\":{...}}. "
+            "Arguments must match the public Noetrium action contract. Prefer short sequences and "
             "respect the observed inventory; historical memory is advisory and "
             "may be stale. Output exactly {\"actions\":[...]}.\n\n"
             f"Task: {json.dumps(task_view, sort_keys=True, ensure_ascii=False)}\n"
@@ -165,57 +171,25 @@ class ModelActionPlanner:
         for row in rows:
             if not isinstance(row, Mapping):
                 raise ValueError("model planner action must be an object")
-            action_value = row.get("action_type", row.get("type", row.get("action", "")))
-            nested_action = dict(action_value) if isinstance(action_value, Mapping) else None
-            if nested_action is not None:
-                action_type = str(
-                    nested_action.get(
-                        "action_type",
-                        nested_action.get("type", nested_action.get("tool", nested_action.get("action", "")))
-                    )
-                ).strip()
-            else:
-                action_type = str(action_value).strip()
-            if action_type not in ALLOWED_ACTIONS and action_type in {"position", "move"}:
-                if any(key in row for key in ("target", "target_position", "position")):
-                    action_type = "goto"
+            action_type = row.get("action_type")
+            if not isinstance(action_type, str) or not action_type.strip():
+                raise ValueError("model planner action_type must be a non-empty string")
+            action_type = action_type.strip()
             if action_type not in ALLOWED_ACTIONS:
                 raise ValueError(f"model planner emitted unsupported action: {action_type}")
             arguments = row.get("arguments")
-            if arguments is None and nested_action is not None:
-                arguments = {
-                    key: value for key, value in nested_action.items()
-                    if key not in {"action_type", "type", "tool", "reason", "timeout_s"}
-                }
-            if arguments is None:
-                arguments = {
-                    key: value for key, value in row.items()
-                    if key not in {"action_type", "type", "action", "reason", "timeout_s"}
-                }
-                if "target_position" in arguments and "position" not in arguments:
-                    arguments["position"] = arguments.pop("target_position")
-                if action_type == "goto" and "target" in arguments and "position" not in arguments:
-                    arguments["position"] = arguments.pop("target")
-                if "block_type" in arguments and "block" not in arguments:
-                    arguments["block"] = arguments.pop("block_type")
-                if action_type == "collect_block" and "count" not in arguments:
-                    arguments["count"] = 1
-            if isinstance(arguments, Mapping):
-                arguments = dict(arguments)
-                if "target_position" in arguments and "position" not in arguments:
-                    arguments["position"] = arguments.pop("target_position")
-                if action_type == "goto" and "target" in arguments and "position" not in arguments:
-                    arguments["position"] = arguments.pop("target")
-                if "block_type" in arguments and "block" not in arguments:
-                    arguments["block"] = arguments.pop("block_type")
-                if action_type == "collect_block" and "count" not in arguments:
-                    arguments["count"] = 1
             if not isinstance(arguments, Mapping):
-                raise ValueError("model planner action arguments must be an object")
+                raise ValueError("model planner action requires canonical arguments object")
+            try:
+                canonical_arguments = validate_minecraft_action(action_type, arguments)
+            except MinecraftActionContractError as exc:
+                raise ValueError(
+                    f"model planner action violates Noetrium action contract: {exc}"
+                ) from exc
             timeout_s = float(row.get("timeout_s", 90.0))
             if timeout_s <= 0 or timeout_s > 600:
                 raise ValueError("model planner action timeout is out of range")
-            plan.append((action_type, dict(arguments), timeout_s))
+            plan.append((action_type, canonical_arguments, timeout_s))
         return tuple(plan)
 
 
