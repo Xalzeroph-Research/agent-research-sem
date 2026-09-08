@@ -46,9 +46,21 @@ SEM imports generic contracts through generated public facades:
   project-model binding: immutable model identity, request context, prompt
   identity, request recording, and qualified closure verification.
 
-open_sem_method_session() opens SEM through Noetrium's method
-endpoint/runtime boundary. SemMethodAgentMemoryAdapter is the only
-cognition-to-SEM memory seam.
+The supported project-facing bindings are:
+
+- noetrium.platform.bind_method_endpoint(implementation, runtime) binds
+  SEM's method implementation to Noetrium's session runtime.
+- noetrium.platform.bind_bundled_minecraft_environment(...) binds the
+  typed Minecraft environment/provider.
+- noetrium.platform.bind_qualified_project_model(...) binds a published,
+  qualified model closure and records model requests.
+- noetrium.platform.bind_directory_run_artifact_store(...) seals durable
+  assignment artifacts; build_project_run_checkpoint_store(...) provides
+  Noetrium checkpoint persistence.
+
+open_sem_method_session() uses the first binding and never imports
+Noetrium's private semantic-plane implementation namespace.
+SemMethodAgentMemoryAdapter is the only cognition-to-SEM memory seam.
 
 ## Quick start
 
@@ -60,6 +72,8 @@ python -m projects.sem_paper.cli doctor
 python -m projects.sem_paper.cli protocol
 python -m projects.sem_paper.cli smoke
 python -m projects.sem_paper.cli evobench --streams-per-track 2
+python -m projects.sem_paper.cli analyze --results-dir results/real \
+  --figure-dir results/real/figures
 ~~~
 
 A real Minecraft pilot/matrix additionally requires a vanilla server, the

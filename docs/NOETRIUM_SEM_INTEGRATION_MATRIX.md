@@ -1,6 +1,6 @@
 # Noetrium capability and SEM integration matrix
 
-Date: 2026-09-07
+Date: 2026-09-08
 
 This document records the capability review performed against the Noetrium
 public downstream catalog and the SEM canonical branch. The catalog currently
@@ -24,19 +24,19 @@ contract is absent, the issue is upstream and must be fixed in Noetrium first.
 
 | Noetrium capability | Public surface | Current SEM state | Next change |
 | --- | --- | --- | --- |
-| Method identity/session/recall/outcome | participant/method | Used by SEMMethodSession | Keep the method ABI; bind runtime services explicitly |
+| Method identity/session/outcome | participant/method + noetrium.platform.bind_method_endpoint | Complete: SEM opens through the public facade | Keep the method ABI and typed services |
 | Agent cognition memory seam | participant/agent / AgentMemoryPort | Adapter now implements checkpoint/restore and is wired into environment calls | Use SemMethodAgentMemoryAdapter for all memory treatments except no_memory |
 | Typed memory graph substrate | components / noetrium.contracts.systems.components | Used through the public facade | Populate typed node metadata; keep semantic policy in SEM |
 | Typed node metadata | MemoryNodeRecord fields purpose/scope/mode/schema/access/sources/transform/maintenance_contract/provenance | Upstream public contract now available in af9ec480 | SEM constructors and edit materialization must preserve every field |
-| Environment and Minecraft | environment/*, especially environment/minecraft | Generic action/observation types are used; real bridge still owns a local subprocess adapter | Move lifecycle, world cut/branch, readiness, and effect receipts behind the Noetrium environment seams |
+| Environment and Minecraft | environment/*, especially environment/minecraft | Generic action/observation/effect types are used; provider lifecycle is Noetrium-bound and assignment reset enters through noetrium.platform.run_local_shell_command | Bind world cut/branch, readiness, and effect receipts through the live Noetrium deployment |
 | Study/variant/run planning | experimentation/study, run, variant | Frozen ExperimentPlan and study execution port are used | Add Noetrium run-control identity and durable lifecycle around each assignment |
-| Checkpoint/branch/evaluation | experimentation/checkpoint, branch, evaluation | SEM has a method-local snapshot; environment checkpoint is only invoked locally | Compose method, environment, and run checkpoints through Noetrium authorities |
+| Checkpoint/branch/evaluation | experimentation/checkpoint, branch, evaluation | Method checkpoints and scripted-environment checkpoints are sealed into result artifacts; live environment checkpoints remain optional until a deployment provider is bound | Bind the live branch/world provider into the frozen run manifest |
 | External effect and recovery | reliability/effect, recovery, forensics | SEM has evidence and bridge recovery logic, but not the generic effect/recovery ports | Route action receipts and uncertain effects through Noetrium; keep SEM evidence interpretation downstream |
 | Persistent server/session runtime | runtime/session, runtime/server/* | Not called by SEM core or runner | Inject the runtime composition; SEM must not call tmux directly |
-| Process/toolchain/Python execution | runtime/process, runtime/toolchain, runtime/python | Real environment uses direct subprocess and host paths | Replace direct lifecycle ownership with Noetrium process/runtime bindings |
+| Process/toolchain/Python execution | runtime/process, runtime/toolchain, runtime/python | SEM has no direct subprocess call; deployment-owned reset uses the public Noetrium host-command facade, while full lifecycle remains provider composition | Inject the Noetrium process/runtime binding for deployment lifecycle actions |
 | Model request/serving/deployment | model/request, model/serving, model/deployment | Planner uses a direct HTTP request path | Adapt planner to the typed model request/serving boundary |
-| Observability and telemetry | observability/* | SEM exposes diagnostics and raw assignment JSON | Publish lifecycle/diagnostic facts through Noetrium observation ports |
-| Artifact/data/lineage | artifact/*, data/* | Evidence is method-local and JSON-backed | Use artifact/lineage for durable evidence bundles and held-out audit references |
+| Observability and telemetry | observability/* | SEM exposes semantic diagnostics; assignment results are sealed through the Noe artifact store | Publish lifecycle/diagnostic facts through Noetrium observation ports |
+| Artifact/data/lineage | artifact/*, data/* | Assignment results now use Noe durable artifact store and finalization/verification; semantic evidence remains SEM-owned | Publish complete evidence/lineage manifests through the run authority |
 | Governance/gates | governance/gate, governance/quality, governance/evolution | SEM owns proposal-blind scientific gate | Keep scientific gate downstream; use generic platform gates for composition and release checks |
 
 ## tmux and persistence

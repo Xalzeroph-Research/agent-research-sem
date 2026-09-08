@@ -11,8 +11,19 @@ from .core import (
 )
 from .adapter import SemMethodAgentMemoryAdapter
 from .gate import ProposalBlindGate, ProposalBlindGateDecision
+from .evolution import (
+    EvolutionAuthority, EvolutionLedger, EvolutionLedgerEntry,
+    MetaArchitectPort, RuleBasedEvolver, SemanticProposal,
+)
 from .evidence import EvidenceChannelError, EvidenceJournal
-from .monitor import ArchitectureIndependentMonitor, MemoryOpportunity
+from .monitor import (
+    ArchitectureIndependentMonitor, MemoryOpportunity,
+    NeutralArchitectureObservation,
+)
+from .semantics import (
+    DETERMINISTIC_TRANSFORMS, SEMANTIC_TRANSFORMS, TransformSpec,
+    parse_transform, validate_transform,
+)
 from .runtime import (
     SEMMethodImplementation,
     SEMMethodSessionRuntime,
@@ -24,8 +35,13 @@ __all__ = [
     "SEMMethodSession", "SEM_METHOD_ID", "SEM_TREATMENTS",
     "SemanticEdit", "StructuralDemand", "SemMethodAgentMemoryAdapter",
     "ProposalBlindGate", "ProposalBlindGateDecision",
+    "EvolutionAuthority", "EvolutionLedger", "EvolutionLedgerEntry",
+    "MetaArchitectPort", "RuleBasedEvolver", "SemanticProposal",
     "EvidenceChannelError", "EvidenceJournal",
     "ArchitectureIndependentMonitor", "MemoryOpportunity",
+    "NeutralArchitectureObservation",
+    "DETERMINISTIC_TRANSFORMS", "SEMANTIC_TRANSFORMS", "TransformSpec",
+    "parse_transform", "validate_transform",
     "SEMMethodImplementation", "SEMMethodSessionRuntime",
     "open_sem_method_session",
 ]

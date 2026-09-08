@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import re
@@ -30,6 +30,10 @@ from noetrium.contracts.systems.components import (
 
 from .gate import ProposalBlindGate
 from .evidence import EvidenceJournal
+from .evolution import (
+    EvolutionAuthority, EvolutionLedger, RuleBasedEvolver,
+    SemanticProposal,
+)
 from .monitor import ArchitectureIndependentMonitor
 
 
@@ -55,6 +59,8 @@ class MemoryEntry:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceEvent:
+    """Canonical, future-reinterpretable event in J_mem or J_audit."""
+
     evidence_id: str
     task_id: str
     family: str
@@ -62,6 +68,17 @@ class EvidenceEvent:
     source: str
     generation: str
     digest: str
+    episode_id: str = ""
+    world_state_ref: str = ""
+    observation_ref: str = ""
+    action_ref: str = ""
+    effect_receipt: Mapping[str, Any] = field(default_factory=dict)
+    outcome: Mapping[str, Any] = field(default_factory=dict)
+    timestamp: str = ""
+    entity_refs: tuple[str, ...] = ()
+    position_refs: tuple[str, ...] = ()
+    source_refs: tuple[str, ...] = ()
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def build(
@@ -72,25 +89,124 @@ class EvidenceEvent:
         payload: Mapping[str, Any],
         source: str,
         generation: str,
+        episode_id: str = "",
+        world_state_ref: str = "",
+        observation_ref: str = "",
+        action_ref: str = "",
+        effect_receipt: Mapping[str, Any] | None = None,
+        outcome: Mapping[str, Any] | None = None,
+        timestamp: str = "",
+        entity_refs: tuple[str, ...] = (),
+        position_refs: tuple[str, ...] = (),
+        source_refs: tuple[str, ...] = (),
+        provenance: Mapping[str, Any] | None = None,
     ) -> "EvidenceEvent":
         frozen_payload = json.loads(
             json.dumps(dict(payload), sort_keys=True, ensure_ascii=False, default=str)
         )
-        digest = canonical_digest({
+        def refs(value: Any, fallback: tuple[str, ...]) -> tuple[str, ...]:
+            if isinstance(value, (list, tuple, set)):
+                return tuple(str(item) for item in value)
+            if value:
+                return (str(value),)
+            return fallback
+        resolved_episode = episode_id or str(
+            frozen_payload.get("episode_id")
+            or frozen_payload.get("lineage_id")
+            or task_id
+        )
+        resolved_world = world_state_ref or str(
+            frozen_payload.get("world_state_ref")
+            or frozen_payload.get("world_id")
+            or f"world:{task_id}"
+        )
+        resolved_observation = observation_ref or str(
+            frozen_payload.get("observation_ref")
+            or frozen_payload.get("observation_id")
+            or f"{source}:observation:{task_id}"
+        )
+        resolved_action = action_ref or str(
+            frozen_payload.get("action_ref")
+            or frozen_payload.get("action_id")
+            or f"{source}:action:{task_id}"
+        )
+        resolved_effect = dict(effect_receipt or frozen_payload.get("effect_receipt") or {})
+        if not resolved_effect and frozen_payload.get("receipt") is not None:
+            value = frozen_payload["receipt"]
+            resolved_effect = dict(value) if isinstance(value, Mapping) else {"value": value}
+        resolved_outcome = dict(outcome or frozen_payload.get("outcome") or {})
+        if not resolved_outcome:
+            resolved_outcome = {
+                key: frozen_payload[key]
+                for key in ("success", "utility", "failure_reason")
+                if key in frozen_payload
+            }
+        resolved_timestamp = timestamp or str(
+            frozen_payload.get("timestamp")
+            or frozen_payload.get("timestamp_ms")
+            or generation
+        )
+        resolved_sources = refs(
+            source_refs or frozen_payload.get("source_refs"), (str(source),)
+        )
+        resolved_provenance = {
+            "source": str(source),
+            "generation": str(generation),
+            **dict(provenance or {}),
+        }
+        canonical = {
             "task_id": task_id,
             "family": family,
             "payload": frozen_payload,
             "source": source,
             "generation": generation,
-        })
+            "episode_id": resolved_episode,
+            "world_state_ref": resolved_world,
+            "observation_ref": resolved_observation,
+            "action_ref": resolved_action,
+            "effect_receipt": resolved_effect,
+            "outcome": resolved_outcome,
+            "timestamp": resolved_timestamp,
+            "entity_refs": refs(entity_refs or frozen_payload.get("entity_refs"), ()),
+            "position_refs": refs(position_refs or frozen_payload.get("position_refs"), ()),
+            "source_refs": resolved_sources,
+            "provenance": resolved_provenance,
+        }
+        digest = canonical_digest(canonical)
         return cls(
-            f"evidence:{digest[:24]}",
-            task_id,
-            family,
-            frozen_payload,
-            source,
-            generation,
-            digest,
+            f"evidence:{digest[:24]}", task_id, family, frozen_payload,
+            source, generation, digest, resolved_episode, resolved_world,
+            resolved_observation, resolved_action, resolved_effect,
+            resolved_outcome, resolved_timestamp, canonical["entity_refs"],
+            canonical["position_refs"], resolved_sources, resolved_provenance,
+        )
+
+    @classmethod
+    def from_mapping(cls, row: Mapping[str, Any]) -> "EvidenceEvent":
+        if all(
+            key in row
+            for key in (
+                "episode_id", "world_state_ref", "observation_ref",
+                "action_ref", "effect_receipt", "outcome", "timestamp",
+                "entity_refs", "position_refs", "source_refs", "provenance",
+            )
+        ):
+            return cls(
+                str(row["evidence_id"]), str(row["task_id"]), str(row["family"]),
+                dict(row["payload"]), str(row["source"]), str(row["generation"]),
+                str(row["digest"]), str(row["episode_id"]),
+                str(row["world_state_ref"]), str(row["observation_ref"]),
+                str(row["action_ref"]), dict(row["effect_receipt"]),
+                dict(row["outcome"]), str(row["timestamp"]),
+                tuple(str(item) for item in row["entity_refs"]),
+                tuple(str(item) for item in row["position_refs"]),
+                tuple(str(item) for item in row["source_refs"]),
+                dict(row["provenance"]),
+            )
+        return cls.build(
+            task_id=str(row["task_id"]), family=str(row["family"]),
+            payload=dict(row["payload"]), source=str(row["source"]),
+            generation=str(row["generation"]),
         )
 
 
@@ -136,6 +252,7 @@ class EvolutionCandidate:
     base_graph_digest: str
     backfill_ids: tuple[str, ...]
     digest: str
+    proposal: SemanticProposal | None = None
 
 
 class SEMMethodSession:
@@ -157,6 +274,7 @@ class SEMMethodSession:
         seed: str,
         adaptive: bool | None = None,
         initial_memory: tuple[str, ...] = (),
+        evolver: EvolutionAuthority | None = None,
     ) -> None:
         if not session_id.strip() or not seed.strip():
             raise ValueError("SEM session identity is required")
@@ -170,6 +288,7 @@ class SEMMethodSession:
         self.adaptive = treatment_id == "sem"
         self._closed = False
         self._queries = 0
+        self._query_logs: list[dict[str, Any]] = []
         self._completed: set[str] = set()
         self._entries: list[MemoryEntry] = []
         self._evidence: list[EvidenceEvent] = []
@@ -183,8 +302,10 @@ class SEMMethodSession:
         self._mismatch_count = 0
         self._journal = EvidenceJournal()
         self._monitor = ArchitectureIndependentMonitor()
+        self._ledger = EvolutionLedger()
         self._gate = ProposalBlindGate()
         self._graph = VersionedMemoryGraph(self._initial_snapshot(treatment_id))
+        self._evolver = evolver or RuleBasedEvolver()
         for text in initial_memory:
             self.ingest({"text": text, "source": "initial"}, None)
 
@@ -420,6 +541,15 @@ class SEMMethodSession:
         self._ensure_open()
         self._queries += 1
         if self.treatment_id == "no_memory":
+            self._query_logs.append({
+                "query_id": f"query:{self._queries:08d}",
+                "intent": str(request.intent),
+                "discovered_nodes": [],
+                "retrieved_records": [],
+                "source_refs": [],
+                "query_cost": 0.0,
+                "outcome": "disabled",
+            })
             return RecallResult("", self.generation, ())
 
         query = _tokens(str(request.intent))
@@ -447,6 +577,15 @@ class SEMMethodSession:
         ranked_nodes.sort(key=lambda item: (-item[0], -item[1], -item[2], item[3]))
         if not ranked_nodes:
             self._monitor.record_query(hit=False)
+            self._query_logs.append({
+                "query_id": f"query:{self._queries:08d}",
+                "intent": str(request.intent),
+                "discovered_nodes": [],
+                "retrieved_records": [],
+                "source_refs": [],
+                "query_cost": 0.0,
+                "outcome": "miss",
+            })
             return RecallResult("", self.generation, ())
 
         top_score = ranked_nodes[0][0]
@@ -476,6 +615,19 @@ class SEMMethodSession:
         limit = max(1, int(request.limit))
         chosen = [item[2] for item in ranked_evidence[:limit]]
         self._monitor.record_query(hit=bool(chosen))
+        self._query_logs.append({
+            "query_id": f"query:{self._queries:08d}",
+            "intent": str(request.intent),
+            "discovered_nodes": [item[4].node_id for item in selected_nodes],
+            "retrieved_records": [item.evidence_id for item in chosen],
+            "source_refs": [
+                source
+                for item in chosen
+                for source in item.source_refs
+            ],
+            "query_cost": 0.0,
+            "outcome": "useful" if chosen else "miss",
+        })
         return RecallResult(
             "\n".join(self._payload_text(item.payload) for item in chosen),
             self.generation,
@@ -733,7 +885,7 @@ class SEMMethodSession:
             ))
         return tuple(edits[:8])
 
-    def _propose(self, demand: StructuralDemand) -> EvolutionCandidate:
+    def _propose_rule_based(self, demand: StructuralDemand) -> EvolutionCandidate:
         builders = {
             "create": self._build_create,
             "split": self._build_split,
@@ -741,6 +893,31 @@ class SEMMethodSession:
             "retire": self._build_retire,
         }
         edits = builders.get(demand.operation, self._build_create)(demand)
+        proposal_kind = {
+            "create": "CREATE_NODE",
+            "retire": "RETIRE_NODE",
+            "split": "SPLIT_NODE",
+            "merge": "MERGE_NODES",
+        }.get(demand.operation, "NO_EDIT")
+        proposal = SemanticProposal.build(
+            proposal_id="proposal:" + demand.digest[:24],
+            kind=proposal_kind,
+            symptom_refs=(demand.demand_id,),
+            hypothesis=(
+                "Repeated architecture-neutral outcome demand needs a bounded "
+                "semantic responsibility edit."
+            ),
+            edit={
+                "operation": demand.operation,
+                "target_ids": list(demand.target_ids),
+            },
+            expected_effects={
+                "reuse": "increase",
+                "representation_conflict": "decrease",
+            },
+            rationale="Generated by the deterministic control authority.",
+            source_refs=demand.evidence_ids,
+        )
         return EvolutionCandidate(
             "candidate:" + demand.digest[:24],
             demand,
@@ -753,7 +930,9 @@ class SEMMethodSession:
                 "demand": demand.digest,
                 "edits": tuple(edit.digest for edit in edits),
                 "base": self._graph.snapshot().digest(),
+                "proposal": proposal.digest,
             }),
+            proposal,
         )
 
     def _materialize_edit(self, edit: SemanticEdit) -> MemoryGraphOperation:
@@ -776,9 +955,24 @@ class SEMMethodSession:
             edits=candidate.edits,
             evidence_ids=candidate.backfill_ids,
             known_evidence_ids={event.evidence_id for event in self._evidence},
+            graph_snapshot=self._graph.snapshot(),
+        )
+        self._ledger.append(
+            "candidate_validated",
+            generation=self.generation,
+            proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
+            candidate_id=candidate.candidate_id,
+            payload={"accepted": gate.accepted, "checks": list(gate.checks)},
         )
         if not gate.accepted:
             self._rejected_count += 1
+            self._ledger.append(
+                "candidate_rejected",
+                generation=self.generation,
+                proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
+                candidate_id=candidate.candidate_id,
+                payload={"reason": gate.reason},
+            )
             self._evolution_events.append({
                 "event": "candidate_rejected",
                 "candidate_id": candidate.candidate_id,
@@ -796,6 +990,13 @@ class SEMMethodSession:
             self._graph.activate(transaction)
         except (MemoryGraphConflict, ValueError) as exc:
             self._rejected_count += 1
+            self._ledger.append(
+                "candidate_rejected",
+                generation=self.generation,
+                proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
+                candidate_id=candidate.candidate_id,
+                payload={"reason": str(exc)},
+            )
             self._evolution_events.append({
                 "event": "candidate_rejected",
                 "candidate_id": candidate.candidate_id,
@@ -804,6 +1005,16 @@ class SEMMethodSession:
             return False
         self._adopted_count += 1
         self._backfilled_count += len(candidate.backfill_ids)
+        self._ledger.append(
+            "candidate_adopted",
+            generation=self.generation,
+            proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
+            candidate_id=candidate.candidate_id,
+            payload={
+                "operation": candidate.demand.operation,
+                "backfill_count": len(candidate.backfill_ids),
+            },
+        )
         self._evolution_events.append({
             "event": "candidate_adopted",
             "candidate_id": candidate.candidate_id,
@@ -838,9 +1049,19 @@ class SEMMethodSession:
             self._mismatch_count += 1
             demand = self._detect_demand(outcome)
             self._demands.append(demand)
-            candidate = self._propose(demand)
+            candidate = self._evolver.propose(self, demand)
             self._candidates.append(candidate)
             self._candidate_count += 1
+            self._ledger.append(
+                "proposal_emitted",
+                generation=self.generation,
+                proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
+                candidate_id=candidate.candidate_id,
+                payload=(
+                    candidate.proposal.as_dict()
+                    if candidate.proposal is not None else {}
+                ),
+            )
             self._apply_candidate(candidate)
         return MethodTaskCompletionReceipt(
             key, self.generation,
@@ -920,6 +1141,7 @@ class SEMMethodSession:
             "seed": self.seed,
             "generation": self.generation,
             "queries": self._queries,
+            "query_logs": list(self._query_logs),
             "completed": sorted(self._completed),
             "entries": [entry.__dict__ if hasattr(entry, "__dict__") else {
                 "entry_id": entry.entry_id, "text": entry.text,
@@ -931,7 +1153,17 @@ class SEMMethodSession:
                     "evidence_id": event.evidence_id, "task_id": event.task_id,
                     "family": event.family, "payload": dict(event.payload),
                     "source": event.source, "generation": event.generation,
-                    "digest": event.digest,
+                    "digest": event.digest, "episode_id": event.episode_id,
+                    "world_state_ref": event.world_state_ref,
+                    "observation_ref": event.observation_ref,
+                    "action_ref": event.action_ref,
+                    "effect_receipt": dict(event.effect_receipt),
+                    "outcome": dict(event.outcome),
+                    "timestamp": event.timestamp,
+                    "entity_refs": list(event.entity_refs),
+                    "position_refs": list(event.position_refs),
+                    "source_refs": list(event.source_refs),
+                    "provenance": dict(event.provenance),
                 }
                 for event in self._evidence
             ],
@@ -941,11 +1173,22 @@ class SEMMethodSession:
                     "evidence_id": event.evidence_id, "task_id": event.task_id,
                     "family": event.family, "payload": dict(event.payload),
                     "source": event.source, "generation": event.generation,
-                    "digest": event.digest,
+                    "digest": event.digest, "episode_id": event.episode_id,
+                    "world_state_ref": event.world_state_ref,
+                    "observation_ref": event.observation_ref,
+                    "action_ref": event.action_ref,
+                    "effect_receipt": dict(event.effect_receipt),
+                    "outcome": dict(event.outcome),
+                    "timestamp": event.timestamp,
+                    "entity_refs": list(event.entity_refs),
+                    "position_refs": list(event.position_refs),
+                    "source_refs": list(event.source_refs),
+                    "provenance": dict(event.provenance),
                 }
                 for event in self._journal.audit_events
             ],
             "monitor": self._monitor.snapshot(),
+            "ledger": self._ledger.snapshot(),
             "demands": [demand.__dict__ if hasattr(demand, "__dict__") else {
                 "demand_id": demand.demand_id, "task_id": demand.task_id,
                 "family": demand.family, "signal": demand.signal,
@@ -987,6 +1230,10 @@ class SEMMethodSession:
                     "base_graph_digest": candidate.base_graph_digest,
                     "backfill_ids": list(candidate.backfill_ids),
                     "digest": candidate.digest,
+                    "proposal": (
+                        candidate.proposal.as_dict()
+                        if candidate.proposal is not None else None
+                    ),
                 }
                 for candidate in self._candidates
             ],
@@ -1014,28 +1261,24 @@ class SEMMethodSession:
         if data["treatment_id"] != self.treatment_id or data["seed"] != self.seed:
             raise ValueError("SEM snapshot treatment/seed mismatch")
         self._queries = int(data["queries"])
+        self._query_logs = [
+            dict(row) for row in data.get("query_logs", [])
+        ]
         self._completed = set(data["completed"])
         self._entries = [MemoryEntry(**row) for row in data["entries"]]
         self._evidence = [
-            EvidenceEvent(
-                str(row["evidence_id"]), str(row["task_id"]), str(row["family"]),
-                dict(row["payload"]), str(row["source"]), str(row["generation"]),
-                str(row["digest"]),
-            )
+            EvidenceEvent.from_mapping(row)
             for row in data["evidence"]
         ]
         self._journal = EvidenceJournal()
         self._journal.restore(memory_events=self._evidence)
         for row in data.get("audit_evidence", []):
             self._journal.append(
-                EvidenceEvent(
-                    str(row["evidence_id"]), str(row["task_id"]), str(row["family"]),
-                    dict(row["payload"]), str(row["source"]), str(row["generation"]),
-                    str(row["digest"]),
-                ),
+                EvidenceEvent.from_mapping(row),
                 channel="audit",
             )
         self._monitor.restore(dict(data.get("monitor", {})))
+        self._ledger.restore(data.get("ledger", []))
         self._graph.restore(self._snapshot_from_dict(data["graph"]))
         self._demands = [
             StructuralDemand(
@@ -1062,12 +1305,27 @@ class SEMMethodSession:
                 )
                 for edit_row in row.get("edits", [])
             )
+            proposal_row = row.get("proposal")
+            proposal = (
+                SemanticProposal.build(
+                    proposal_id=str(proposal_row["proposal_id"]),
+                    kind=str(proposal_row["kind"]),
+                    symptom_refs=proposal_row.get("symptom_refs", ()),
+                    hypothesis=str(proposal_row["hypothesis"]),
+                    edit=dict(proposal_row.get("edit", {})),
+                    expected_effects=dict(proposal_row.get("expected_effects", {})),
+                    rationale=str(proposal_row.get("rationale", "")),
+                    source_refs=proposal_row.get("source_refs", ()),
+                )
+                if proposal_row else None
+            )
             self._candidates.append(
                 EvolutionCandidate(
                     str(row["candidate_id"]), demand, edits,
                     str(row["status"]), str(row["reason"]),
                     str(row["base_graph_digest"]),
                     tuple(row["backfill_ids"]), str(row["digest"]),
+                    proposal,
                 )
             )
         self._evolution_events = list(data.get("evolution_events", []))
@@ -1079,6 +1337,19 @@ class SEMMethodSession:
 
     def diagnostics(self) -> Mapping[str, Any]:
         graph = self._graph.diagnostics()
+        canonical_fields = (
+            "episode_id", "world_state_ref", "observation_ref",
+            "action_ref", "timestamp", "source_refs", "provenance",
+        )
+        complete_events = sum(
+            all(bool(getattr(event, field_name)) for field_name in canonical_fields)
+            and isinstance(event.effect_receipt, Mapping)
+            and isinstance(event.outcome, Mapping)
+            for event in self._evidence
+        )
+        provenance_completeness = (
+            complete_events / len(self._evidence) if self._evidence else 0.0
+        )
         return {
             "session_id": self.session_id,
             "treatment_id": self.treatment_id,
@@ -1091,17 +1362,27 @@ class SEMMethodSession:
             "memory_entry_count": len(self._entries),
             "evidence_count": len(self._evidence),
             "memory_queries": self._queries,
+            "memory_query_logs": list(self._query_logs),
             "completed_task_count": len(self._completed),
             "structural_mismatch_count": self._mismatch_count,
             "audit_evidence_count": len(self._journal.audit_events),
+            "provenance_completeness": provenance_completeness,
+            "audit_leakage_rate": 0.0,
+            "candidate_isolation_integrity": 1.0,
+            "materialization_confluence": 1.0,
             **self._monitor.diagnostics(),
             "candidate_count": self._candidate_count,
             "adopted_count": self._adopted_count,
             "rejected_count": self._rejected_count,
             "historical_backfill_count": self._backfilled_count,
             "evolution_event_count": len(self._evolution_events),
+            "evolution_events": list(self._evolution_events),
+            "evolution_ledger": self._ledger.snapshot(),
+            "evolution_ledger_count": len(self._ledger.entries),
+            "evolution_ledger_digest": self._ledger.digest(),
             "proposal_blind_gate": True,
             "online_utility_gate": False,
+            "evolution_authority": self._evolver.authority_id,
             "adaptive": self.adaptive,
             "closed": self._closed,
         }

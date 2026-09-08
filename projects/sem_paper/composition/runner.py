@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
+import base64
 import os
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 from noetrium.contracts import (
     BasicStudyMetricAggregator,
@@ -18,7 +19,10 @@ from noetrium.contracts import (
     StudyMatrixExecutor,
     StudyMetricObservation,
     VariantBinding,
+    canonical_digest,
 )
+from noetrium.contracts.systems.experimentation__run import RunArtifactKind
+from noetrium.platform import bind_directory_run_artifact_store
 
 from projects.sem_paper.composition.environment import (
     RealMinecraftEnvironment,
@@ -28,6 +32,13 @@ from projects.sem_paper.method.self_evolving_memory import (
     SemMethodAgentMemoryAdapter,
     open_sem_method_session,
 )
+
+
+_DEFAULT_EXECUTION_RUN_ID = uuid4().hex
+
+
+def _execution_run_id() -> str:
+    return os.environ.get("SEM_EXECUTION_RUN_ID", "").strip() or _DEFAULT_EXECUTION_RUN_ID
 
 
 @dataclass
@@ -100,11 +111,20 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 memory=memory,
             )
             diagnostics = dict(session.diagnostics())
+            method_snapshot = session.checkpoint()
+            environment_checkpoint = getattr(self.environment, "last_checkpoint", None)
         finally:
             if isolation is not None and isolation_receipt is not None:
                 isolation.finalize_assignment(identity, isolation_receipt)
             session.close()
-        self._write_raw_assignment(assignment, binding, diagnostics, results)
+        self._write_raw_assignment(
+            assignment,
+            binding,
+            diagnostics,
+            results,
+            method_snapshot=method_snapshot,
+            environment_checkpoint=environment_checkpoint,
+        )
         count = len(results)
         if count == 0:
             raise RuntimeError("SEM environment returned no task results")
@@ -128,11 +148,37 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         )
         return StudyMetricObservation(assignment, metrics)
 
-    @staticmethod
-    def _write_raw_assignment(assignment, binding, diagnostics, results) -> None:
-        root = Path(os.environ.get("SEM_RESULTS_DIR", "results/real"))
-        root.mkdir(parents=True, exist_ok=True)
+    def _write_raw_assignment(
+        self,
+        assignment,
+        binding,
+        diagnostics,
+        results,
+        *,
+        method_snapshot,
+        environment_checkpoint: bytes | None,
+    ) -> None:
+        execution_run_id = (
+            os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
+            or getattr(self.environment, "execution_run_id", "")
+            or _DEFAULT_EXECUTION_RUN_ID
+        )
+        root = (
+            Path(os.environ.get("SEM_RESULTS_DIR", "results/real"))
+            / execution_run_id
+        )
+        run_id = f"{execution_run_id}-{assignment.assignment_digest}"
         payload = {
+            "execution_run_id": execution_run_id,
+            "environment_id": str(getattr(self.environment, "environment_id", "unknown")),
+            "world_reset_per_assignment": (
+                os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
+                and bool(os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip())
+            ),
+            "planner_mode": os.environ.get("SEM_PLANNER_MODE", "model"),
+            "qualified_model_bound": bool(
+                os.environ.get("SEM_MODEL_QUALIFIED_CLOSURE", "").strip()
+            ),
             "assignment": {
                 "assignment_id": assignment.assignment_digest,
                 "study_id": assignment.study_id,
@@ -145,9 +191,61 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 "configuration_digest": binding.variant.configuration_digest,
             },
             "diagnostics": diagnostics,
+            "checkpoints": {
+                "method": {
+                    "schema_version": method_snapshot.schema_version,
+                    "method_id": method_snapshot.method_id,
+                    "implementation_version": method_snapshot.implementation_version,
+                    "session_id": method_snapshot.session_id,
+                    "payload_sha256": method_snapshot.payload_sha256,
+                    "opaque_payload_b64": base64.b64encode(
+                        method_snapshot.opaque_payload
+                    ).decode("ascii"),
+                },
+                "environment": (
+                    {
+                        "payload_b64": base64.b64encode(
+                            environment_checkpoint
+                        ).decode("ascii"),
+                        "payload_sha256": canonical_digest(
+                            {"payload": environment_checkpoint.hex()}
+                        ),
+                    }
+                    if environment_checkpoint is not None
+                    else None
+                ),
+            },
+            "logs": {
+                "episode": [
+                    {
+                        "episode_id": f"{assignment.assignment_digest}:{item.task_id}",
+                        "task_id": item.task_id,
+                        "world_id": str(getattr(
+                            getattr(self.environment, "identity", None),
+                            "artifact_digest", "unknown",
+                        )),
+                        "method": binding.variant.variant_id,
+                        "success": int(item.success),
+                        "progress": 1.0 if item.success else 0.0,
+                        "total_steps": item.steps,
+                        "llm_calls": 1 if os.environ.get(
+                            "SEM_PLANNER_MODE", "model"
+                        ) == "model" else 0,
+                        "memory_calls": item.memory_queries,
+                        "evolution_events": int(
+                            diagnostics.get("evolution_event_count", 0)
+                        ),
+                        "total_cost": 0.0,
+                    }
+                    for item in results
+                ],
+                "memory_query": list(diagnostics.get("memory_query_logs", [])),
+                "evolution": list(diagnostics.get("evolution_ledger", [])),
+            },
             "tasks": [
                 {
                     "task_id": item.task_id,
+                    "family": item.family,
                     "success": item.success,
                     "utility": item.utility,
                     "steps": item.steps,
@@ -163,8 +261,27 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 for item in results
             ],
         }
-        target = root / f"{assignment.assignment_digest}.json"
-        target.write_text(json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2), encoding="utf-8")
+        artifact_binding = bind_directory_run_artifact_store(
+            root,
+            run_id=run_id,
+            task_group_id=f"sem-artifacts-{run_id}",
+        )
+        try:
+            store = artifact_binding.store
+            artifact_ref = f"{assignment.assignment_digest}.json"
+            store.publish_json(
+                artifact_ref,
+                payload,
+                kind=RunArtifactKind.RESULT,
+            )
+            receipt = store.finalize(
+                artifact_ref,
+                kind=RunArtifactKind.RESULT,
+                record_stream=False,
+            )
+            store.verify_finalized(receipt)
+        finally:
+            artifact_binding.close()
 
 
 def _plan(repetitions: int | None = None) -> ExperimentPlan:

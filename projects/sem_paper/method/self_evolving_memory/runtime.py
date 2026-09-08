@@ -12,9 +12,7 @@ from noetrium.contracts.systems.participant__method import (
     MethodServices,
     MethodSession,
 )
-from noetrium_platform.capabilities.participant.method.runtime import (
-    DefaultMethodEndpointFactory,
-)
+from noetrium.platform import bind_method_endpoint
 
 from .core import SEMMethodSession, SEM_METHOD_ID
 
@@ -111,7 +109,7 @@ def open_sem_method_session(
 
     implementation = SEMMethodImplementation(treatment_id, seed, initial_memory)
     runtime = SEMMethodSessionRuntime()
-    endpoint = DefaultMethodEndpointFactory().bind(implementation, runtime)
+    endpoint = bind_method_endpoint(implementation, runtime)
     session = endpoint.open_session(
         session_id=session_id,
         services=MethodServices(_MethodObservationSink()),

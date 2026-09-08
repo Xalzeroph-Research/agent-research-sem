@@ -14,6 +14,9 @@ from projects.sem_paper.benchmarks import (
 )
 from projects.sem_paper.composition import run_confirmatory_smoke
 from projects.sem_paper.composition.runner import run_real_matrix, run_real_pilot
+from projects.sem_paper.experiments.analysis import (
+    render_required_figures, write_analysis,
+)
 from projects.sem_paper.experiments import (
     build_benchmark,
     build_sem_paper_confirmatory_protocol,
@@ -24,7 +27,7 @@ from projects.sem_paper.experiments import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sem")
-    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "evobench", "benchmark-catalog", "external-prepare", "real-pilot", "real"))
+    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "evobench", "benchmark-catalog", "external-prepare", "real-pilot", "real", "analyze"))
     parser.add_argument("--track", action="append", dest="tracks")
     parser.add_argument("--streams-per-track", type=int, default=2)
     parser.add_argument("--benchmark-id")
@@ -34,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--planner-mode", choices=("model", "scripted"))
     parser.add_argument("--model-qualified-closure")
     parser.add_argument("--model-request-root")
+    parser.add_argument("--analysis-output")
+    parser.add_argument("--figure-dir")
     args = parser.parse_args(argv)
     if args.repetitions is not None:
         os.environ["SEM_REPETITIONS"] = str(args.repetitions)
@@ -106,6 +111,17 @@ def main(argv: list[str] | None = None) -> int:
             "streams": len(streams),
             "scores": [score.as_dict() for score in scores],
             "claim_status": "diagnostic_only",
+        }
+    elif args.command == "analyze":
+        root = args.results_dir or os.environ.get("SEM_RESULTS_DIR", "results/real")
+        summary = write_analysis(root, output_path=args.analysis_output)
+        figure_paths = ()
+        if args.figure_dir:
+            figure_paths = render_required_figures(root, args.figure_dir)
+        payload = {
+            **summary,
+            "analysis_root": root,
+            "figure_paths": [str(path) for path in figure_paths],
         }
     elif args.command == "real":
         report = run_real_matrix(args.repetitions)

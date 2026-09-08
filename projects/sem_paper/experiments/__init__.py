@@ -1,3 +1,8 @@
+from .analysis import (
+    AssignmentRecord, analyze_run, bootstrap_mean_ci,
+    load_assignment_records, paired_permutation_ci,
+    render_required_figures, write_analysis,
+)
 from .protocol import (
     MANIFEST_PATH,
     PRIMARY_METRICS,
@@ -11,6 +16,9 @@ from .protocol import (
 )
 
 __all__ = [
+    "AssignmentRecord", "analyze_run", "bootstrap_mean_ci",
+    "load_assignment_records", "paired_permutation_ci",
+    "render_required_figures", "write_analysis",
     "MANIFEST_PATH",
     "PRIMARY_METRICS",
     "TREATMENT_IDS",

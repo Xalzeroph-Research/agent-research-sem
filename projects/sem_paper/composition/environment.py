@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-import subprocess
 import time
 from uuid import uuid4
 from typing import Any, Mapping
@@ -33,6 +32,7 @@ from noetrium.contracts.systems.model__request import ExecutionContext
 from noetrium.platform import (
     bind_bundled_minecraft_environment,
     bind_qualified_project_model,
+    run_local_shell_command,
 )
 
 from projects.sem_paper.experiments.protocol import load_task_manifest
@@ -83,6 +83,7 @@ class EnvironmentTaskResult:
     verified_actions: int = 0
     evidence_closed: bool = False
     outcome_codes: tuple[str, ...] = ()
+    family: str = ""
 
 
 class _ScriptedMinecraftSession:
@@ -133,6 +134,9 @@ class ScriptedMinecraftEnvironment:
 
     environment_id = "minecraft.scripted.v2"
 
+    def __init__(self) -> None:
+        self.last_checkpoint: bytes | None = None
+
     @property
     def identity(self) -> EnvironmentIdentity:
         return EnvironmentIdentity(
@@ -169,7 +173,7 @@ class ScriptedMinecraftEnvironment:
                         memory=memory,
                     )
                 )
-            environment_session.checkpoint()
+            self.last_checkpoint = environment_session.checkpoint()
             return tuple(results)
         finally:
             environment_session.close()
@@ -257,6 +261,7 @@ class ScriptedMinecraftEnvironment:
         return EnvironmentTaskResult(
             task_id, success, outcome.utility, steps, steps * 0.5,
             1, blocked, evidence_digest,
+            family=str(task["family"]),
         )
 
 
@@ -270,6 +275,7 @@ class RealMinecraftEnvironment:
     environment_id = "minecraft.mineflayer.jsonl.v1"
 
     def __init__(self, execution_run_id: str | None = None) -> None:
+        self.last_checkpoint: bytes | None = None
         self.execution_run_id = (
             execution_run_id
             or os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -496,6 +502,11 @@ class RealMinecraftEnvironment:
                         ),
                     )
                 )
+            # The live binding currently has no authoritative branch checkpoint
+            # provider; keep the slot empty instead of asking the session to
+            # fabricate a checkpoint. A deployment-supplied checkpoint provider
+            # can populate this field when the world branch authority is bound.
+            self.last_checkpoint = None
             return tuple(results)
         finally:
             if model_binding is not None:
@@ -555,9 +566,7 @@ class RealMinecraftEnvironment:
             session_id=session_id.replace(":", "-"),
             assignment_id=session_id.replace(":", "-"),
         )
-        completed = subprocess.run(
-            rendered, shell=True, text=True, capture_output=True, timeout=300
-        )
+        completed = run_local_shell_command(rendered, timeout_seconds=300)
         if completed.returncode != 0:
             raise RuntimeError(
                 "Minecraft assignment world reset failed: "

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from noetrium.contracts import canonical_digest
 
 
+_BANNED_OBSERVATION_KEYS = frozenset({
+    "recommended_edit",
+    "target_node",
+    "expected_architecture",
+    "human_ontology_label",
+    "hidden_task_family",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryOpportunity:
-    """Architecture-neutral signal presented to a proposal generator."""
+    """Architecture-neutral HistoricalDemand AND EligiblePriorEvidence."""
 
     opportunity_id: str
     signal: str
@@ -23,9 +32,45 @@ class MemoryOpportunity:
     def eligible(self) -> bool:
         return self.support_count > 0 and bool(self.evidence_ids)
 
+    @property
+    def eligible_prior_evidence(self) -> tuple[str, ...]:
+        return self.evidence_ids if self.eligible else ()
+
+
+@dataclass(frozen=True, slots=True)
+class NeutralArchitectureObservation:
+    """The only observation shape exposed to a proposal authority."""
+
+    schema_field_profiles: Mapping[str, Any]
+    memory_usage_statistics: Mapping[str, Any]
+    query_outcomes: Mapping[str, Any]
+    incident_exemplars: tuple[Mapping[str, Any], ...]
+    unresolved_intent_clusters: Mapping[str, Any]
+    pairwise_node_statistics: Mapping[str, Any]
+    architecture_exposure: Mapping[str, Any]
+    evolution_ledger_summary: Mapping[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        value = {
+            "schema_field_profiles": dict(self.schema_field_profiles),
+            "memory_usage_statistics": dict(self.memory_usage_statistics),
+            "query_outcomes": dict(self.query_outcomes),
+            "incident_exemplars": [dict(item) for item in self.incident_exemplars],
+            "unresolved_intent_clusters": dict(self.unresolved_intent_clusters),
+            "pairwise_node_statistics": dict(self.pairwise_node_statistics),
+            "architecture_exposure": dict(self.architecture_exposure),
+            "evolution_ledger_summary": dict(self.evolution_ledger_summary),
+        }
+        if _BANNED_OBSERVATION_KEYS & {str(key) for key in value}:
+            raise ValueError("neutral observation contains an architecture recommendation")
+        return value
+
+    def digest(self) -> str:
+        return canonical_digest(self.as_dict())
+
 
 class ArchitectureIndependentMonitor:
-    """Collect structural symptoms without naming an edit or node."""
+    """Collect structural symptoms without selecting an edit or node."""
 
     def __init__(self) -> None:
         self._support: dict[str, int] = {}
@@ -35,7 +80,9 @@ class ArchitectureIndependentMonitor:
         self._queries = 0
         self._hits = 0
 
-    def observe_failure(self, *, signal: str, evidence_ids: tuple[str, ...]) -> MemoryOpportunity:
+    def observe_failure(
+        self, *, signal: str, evidence_ids: tuple[str, ...]
+    ) -> MemoryOpportunity:
         normalized = signal.strip().lower() or "unresolved_outcome"
         key = canonical_digest({"signal": normalized})[:24]
         self._support[key] = self._support.get(key, 0) + 1
@@ -51,6 +98,32 @@ class ArchitectureIndependentMonitor:
         self._queries += 1
         if hit:
             self._hits += 1
+
+    def neutral_observation(
+        self,
+        *,
+        schema_field_profiles: Mapping[str, Any] = (),
+        incident_exemplars: tuple[Mapping[str, Any], ...] = (),
+        pairwise_node_statistics: Mapping[str, Any] = (),
+        architecture_exposure: Mapping[str, Any] = (),
+        evolution_ledger_summary: Mapping[str, Any] = (),
+    ) -> NeutralArchitectureObservation:
+        return NeutralArchitectureObservation(
+            schema_field_profiles,
+            {
+                "opportunity_count": len(self._support),
+                "failure_support_total": sum(self._support.values()),
+            },
+            {"query_count": self._queries, "hit_count": self._hits},
+            incident_exemplars,
+            {
+                key: value
+                for key, value in self._signals.items()
+            },
+            pairwise_node_statistics,
+            architecture_exposure,
+            evolution_ledger_summary,
+        )
 
     def _opportunity(self, key: str) -> MemoryOpportunity:
         evidence_ids = tuple(self._evidence.get(key, ()))
@@ -74,6 +147,9 @@ class ArchitectureIndependentMonitor:
             "opportunity_count": len(self._support),
             "monitor_query_count": self._queries,
             "monitor_hit_count": self._hits,
+            "eligible_prior_evidence_count": sum(
+                len(item.eligible_prior_evidence) for item in self.opportunities()
+            ),
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -98,4 +174,8 @@ class ArchitectureIndependentMonitor:
         self._hits = int(payload.get("hits", 0))
 
 
-__all__ = ["ArchitectureIndependentMonitor", "MemoryOpportunity"]
+__all__ = [
+    "ArchitectureIndependentMonitor",
+    "MemoryOpportunity",
+    "NeutralArchitectureObservation",
+]

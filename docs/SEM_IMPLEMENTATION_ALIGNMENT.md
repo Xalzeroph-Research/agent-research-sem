@@ -1,6 +1,6 @@
 # SEM implementation alignment
 
-Date: 2026-09-07
+Date: 2026-09-08
 
 This document freezes the implementation boundary between the SEM method and
 the Noetrium platform. The detailed capability review is in
@@ -75,6 +75,17 @@ before forward execution resumes. These signals are diagnostic inputs to the
 proposal boundary; they are not acceptance decisions and do not contain
 held-out utility labels.
 
+## 3B. Downstream scientific schema
+
+SEM now exposes the method-owned canonical evidence fields, restricted
+Transform IR, neutral architecture observations, proposal envelope, and
+append-only evolution ledger. The candidate gate validates syntax, typed node
+fields, transform vocabulary, graph/source preconditions, complexity, and
+canonical no-op cases before delegating graph acyclicity and atomic activation
+to Noetrium. Assignment artifacts also include episode, memory-query, and
+evolution logs. Analysis is assignment-level and reports bootstrap and paired
+permutation intervals; scripted and diagnostic outputs remain non-claim-ready.
+
 ## 4. Noetrium integration rule
 
 SEM imports generic graph types through the generated public Noetrium
@@ -92,7 +103,9 @@ around this endpoint.
 
 SEM must not import components.reference implementation paths from its
 method core. Concrete graph construction is a composition concern; semantic
-policy remains downstream.
+policy remains downstream. Method endpoint binding and deployment-owned host
+commands now enter through noetrium.platform; SEM does not import private
+noetrium_platform runtime factories or call subprocess directly.
 
 If a required capability is absent from the public Noetrium contract, the
 issue is upstream. Add or repair the Noetrium public API and regenerate the
@@ -115,9 +128,8 @@ The migration is intentionally incremental:
 9. agent/environment adapter integration;
 10. treatment-level and assignment-level validation.
 
-The old SEM main branch is a read-only migration source. The canonical SEM
-development branch is sem/noetrium-rewrite; the Noetrium canonical branch is
-main.
+The old SEM main branch is a read-only migration source. The canonical SEM development branch is main; the Noetrium canonical branch is
+also main. Legacy role-assignment material and obsolete branches are retired.
 
 ## 6. Scientific claim boundary
 
