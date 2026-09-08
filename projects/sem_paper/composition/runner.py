@@ -25,8 +25,8 @@ from projects.sem_paper.composition.environment import (
     ScriptedMinecraftEnvironment,
 )
 from projects.sem_paper.method.self_evolving_memory import (
-    SEMMethodSession,
     SemMethodAgentMemoryAdapter,
+    open_sem_method_session,
 )
 
 
@@ -65,11 +65,10 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         binding: VariantBinding,
     ) -> StudyMetricObservation:
         treatment = binding.variant.variant_id
-        session = SEMMethodSession(
+        session, _method_endpoint = open_sem_method_session(
             session_id=f"{assignment.variant_id}:{assignment.repetition}",
             treatment_id=treatment,
             seed=assignment.seed,
-            adaptive=treatment == "sem",
             initial_memory=(),
         )
         memory = (

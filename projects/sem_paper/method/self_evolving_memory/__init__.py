@@ -13,6 +13,11 @@ from .adapter import SemMethodAgentMemoryAdapter
 from .gate import ProposalBlindGate, ProposalBlindGateDecision
 from .evidence import EvidenceChannelError, EvidenceJournal
 from .monitor import ArchitectureIndependentMonitor, MemoryOpportunity
+from .runtime import (
+    SEMMethodImplementation,
+    SEMMethodSessionRuntime,
+    open_sem_method_session,
+)
 
 __all__ = [
     "EvidenceEvent", "EvolutionCandidate", "EvolutionEdit", "MemoryEntry",
@@ -21,4 +26,6 @@ __all__ = [
     "ProposalBlindGate", "ProposalBlindGateDecision",
     "EvidenceChannelError", "EvidenceJournal",
     "ArchitectureIndependentMonitor", "MemoryOpportunity",
+    "SEMMethodImplementation", "SEMMethodSessionRuntime",
+    "open_sem_method_session",
 ]

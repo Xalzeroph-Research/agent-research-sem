@@ -3,11 +3,18 @@ from __future__ import annotations
 import pytest
 
 from noetrium.contracts import MethodTaskOutcome, RecallRequest
+from noetrium.contracts.systems.participant__method import (
+    MethodEndpointPort,
+    MethodSession,
+)
 
 from projects.sem_paper.method.self_evolving_memory import (
     SEMMethodSession,
     SEM_TREATMENTS,
     SemMethodAgentMemoryAdapter,
+    SEMMethodImplementation,
+    SEMMethodSessionRuntime,
+    open_sem_method_session,
 )
 
 
@@ -290,3 +297,19 @@ def test_agent_memory_adapter_uses_public_checkpoint_contract() -> None:
     )
     SemMethodAgentMemoryAdapter(restored).restore(checkpoint)
     assert restored.diagnostics()["graph_digest"] == session.diagnostics()["graph_digest"]
+
+
+
+def test_sem_opens_through_noe_method_endpoint_runtime_contract() -> None:
+    session, endpoint = open_sem_method_session(
+        session_id="method-endpoint",
+        treatment_id="fixed_typed",
+        seed="run",
+    )
+    assert isinstance(endpoint, MethodEndpointPort)
+    assert isinstance(session, MethodSession)
+    assert endpoint.identity == SEMMethodImplementation(
+        "fixed_typed", "run"
+    ).identity
+    assert isinstance(endpoint.runtime, SEMMethodSessionRuntime)
+    session.close()

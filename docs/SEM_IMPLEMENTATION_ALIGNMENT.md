@@ -82,6 +82,14 @@ component facade:
 
 noetrium.contracts.systems.components
 
+The session boundary also uses the generated participant-method facade:
+SEMMethodImplementation and SEMMethodSessionRuntime satisfy Noetrium's
+MethodImplementation and MethodSessionRuntime contracts, and
+open_sem_method_session binds them through Noetrium's MethodEndpointPort and
+MethodServices. SemMethodAgentMemoryAdapter is the AgentMemoryPort boundary
+presented to cognition. The runner must not instantiate a raw method session
+around this endpoint.
+
 SEM must not import components.reference implementation paths from its
 method core. Concrete graph construction is a composition concern; semantic
 policy remains downstream.
