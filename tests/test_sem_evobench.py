@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+
+from noetrium.contracts import (
+    ProjectModelBinding,
+    ProjectModelClientPort,
+    ProjectModelResponse,
+    canonical_bytes,
+)
+from noetrium.contracts.systems.model__request import (
+    ContentRef,
+    ExecutionContext,
+    ImmutableModelIdentity,
+    ModelRequestEnvelope,
+)
 from projects.sem_paper.benchmarks import (
     TRACK_IDS,
     TREATMENT_IDS,
@@ -9,7 +23,14 @@ from projects.sem_paper.benchmarks import (
     compare_methods,
     run_stream,
 )
-from projects.sem_paper.composition.model_planner import ModelActionPlanner
+from projects.sem_paper.composition.model_planner import (
+    ModelActionPlanner,
+    PLANNER_PROMPT_DIGEST,
+    PLANNER_PROMPT_GENERATION_ID,
+    PLANNER_PROMPT_ID,
+    PLANNER_ROLE,
+    planner_model_requirement,
+)
 from projects.sem_paper.experiments import (
     build_benchmark,
     build_sem_paper_confirmatory_protocol,
@@ -115,3 +136,116 @@ def test_model_planner_rejects_unsupported_actions() -> None:
         assert "unsupported action" in str(exc)
     else:
         raise AssertionError("unsupported action was accepted")
+
+
+class _RecordingModelRequests:
+    def __init__(self) -> None:
+        self.records = []
+
+    @staticmethod
+    def _ref(payload: bytes, media_type: str) -> ContentRef:
+        return ContentRef(hashlib.sha256(payload).hexdigest(), len(payload), media_type)
+
+    def record(self, **kwargs):
+        self.records.append(dict(kwargs))
+        body = canonical_bytes(kwargs["request_body"])
+        compiled = kwargs.get("compiled_prompt_text")
+        return ModelRequestEnvelope(
+            "model-request.v1",
+            kwargs["request_id"],
+            kwargs["context"],
+            kwargs["role"],
+            kwargs["model"],
+            kwargs["prompt_generation_id"],
+            kwargs["prompt_id"],
+            kwargs["prompt_digest"],
+            self._ref(body, "application/json"),
+            None if compiled is None else self._ref(compiled.encode("utf-8"), "text/plain"),
+        )
+
+    def reconstruct(self, envelope):
+        raise NotImplementedError
+
+    def reconstruct_request_body(self, envelope):
+        raise NotImplementedError
+
+    def verify_visible_request(self, envelope, actual_body):
+        return None
+
+
+class _TypedPlannerClient:
+    def __init__(self) -> None:
+        requirement = planner_model_requirement()
+        self.binding = ProjectModelBinding(
+            requirement_digest=requirement.digest(),
+            provider_id="sem-qualified",
+            provider_profile_digest="1" * 64,
+            role=PLANNER_ROLE,
+            model=ImmutableModelIdentity(
+                "sem-qwen38-27b",
+                "repo/sem-qwen38-27b",
+                "rev-1",
+                "vllm",
+                "0.10",
+                "bfloat16",
+                None,
+                262144,
+            ),
+            deployment_id="sem-qwen38-tp2",
+            deployment_generation="2" * 64,
+            model_stack_digest="3" * 64,
+            qualification_certificate_digest="4" * 64,
+            runtime_qualification_digest="5" * 64,
+            host_identity_digest="6" * 64,
+            prompt_generation_id=PLANNER_PROMPT_GENERATION_ID,
+            prompt_id=PLANNER_PROMPT_ID,
+            prompt_digest=PLANNER_PROMPT_DIGEST,
+            capabilities=("generation",),
+            runtime_canary_evidence_digests=("7" * 64,),
+        )
+        self.requests = []
+
+    def complete(self, request):
+        self.requests.append(request)
+        return ProjectModelResponse(
+            request.request_digest,
+            self.binding.digest(),
+            "8" * 64,
+            '{"actions":[{"action_type":"wait","arguments":{}}]}',
+            finish_reason="stop",
+            input_tokens=17,
+            output_tokens=5,
+        )
+
+
+def test_model_planner_uses_typed_client_and_stable_prompt_identity() -> None:
+    client = _TypedPlannerClient()
+    recorder = _RecordingModelRequests()
+    assert isinstance(client, ProjectModelClientPort)
+    planner = ModelActionPlanner(client, recorder)
+    first_context = ExecutionContext("run-1", "trace-1", "span-1", task_id="task-1")
+    second_context = ExecutionContext("run-1", "trace-1", "span-2", task_id="task-2")
+
+    first = planner.plan(
+        task={"task_id": "task-1", "goal": "wait", "max_steps": 1},
+        memory_context="memory-a",
+        snapshot={"inventory": []},
+        context=first_context,
+    )
+    second = planner.plan(
+        task={"task_id": "task-2", "goal": "wait elsewhere", "max_steps": 1},
+        memory_context="memory-b",
+        snapshot={"inventory": ["oak_log"]},
+        context=second_context,
+    )
+
+    assert first == second == (("wait", {}, 90.0),)
+    assert len(client.requests) == 2
+    assert [row["prompt_digest"] for row in recorder.records] == [
+        PLANNER_PROMPT_DIGEST, PLANNER_PROMPT_DIGEST
+    ]
+    assert recorder.records[0]["compiled_prompt_text"] != recorder.records[1]["compiled_prompt_text"]
+    assert all(row["request_body"]["model"] == "sem-qwen38-27b" for row in recorder.records)
+    assert all(request.requirement_digest == client.binding.requirement_digest for request in client.requests)
+    assert planner.prompt_tokens == 34
+    assert planner.completion_tokens == 10

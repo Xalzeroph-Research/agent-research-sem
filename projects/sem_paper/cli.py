@@ -32,8 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repetitions", type=int)
     parser.add_argument("--results-dir")
     parser.add_argument("--planner-mode", choices=("model", "scripted"))
-    parser.add_argument("--model-base-url")
-    parser.add_argument("--model-name")
+    parser.add_argument("--model-qualified-closure")
+    parser.add_argument("--model-request-root")
     args = parser.parse_args(argv)
     if args.repetitions is not None:
         os.environ["SEM_REPETITIONS"] = str(args.repetitions)
@@ -41,10 +41,10 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["SEM_RESULTS_DIR"] = args.results_dir
     if args.planner_mode:
         os.environ["SEM_PLANNER_MODE"] = args.planner_mode
-    if args.model_base_url:
-        os.environ["SEM_MODEL_BASE_URL"] = args.model_base_url
-    if args.model_name:
-        os.environ["SEM_MODEL_NAME"] = args.model_name
+    if args.model_qualified_closure:
+        os.environ["SEM_MODEL_QUALIFIED_CLOSURE"] = args.model_qualified_closure
+    if args.model_request_root:
+        os.environ["SEM_MODEL_REQUEST_ROOT"] = args.model_request_root
     if args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()
         plan = compile_sem_paper_experiment_plan(protocol)

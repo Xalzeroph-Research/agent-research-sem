@@ -21,23 +21,26 @@ from noetrium.contracts import (
     EnvironmentProviderCapabilities,
     EnvironmentSession,
     MethodTaskOutcome,
+    ModelProviderProfile,
     Observation,
     RecallRequest,
     canonical_bytes,
     canonical_digest,
 )
 
-from noetrium.contracts.systems.model__request import (
-    ExecutionContext,
-    ImmutableModelIdentity,
-    ModelRequestRecorderPort,
-)
+from noetrium.contracts.systems.model__request import ExecutionContext
 
-from noetrium.platform import bind_bundled_minecraft_environment
+from noetrium.platform import (
+    bind_bundled_minecraft_environment,
+    bind_qualified_project_model,
+)
 
 from projects.sem_paper.experiments.protocol import load_task_manifest
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
-from projects.sem_paper.composition.model_planner import ModelActionPlanner
+from projects.sem_paper.composition.model_planner import (
+    ModelActionPlanner,
+    planner_model_requirement,
+)
 
 
 def load_scripted_action_plan(
@@ -266,14 +269,7 @@ class RealMinecraftEnvironment:
 
     environment_id = "minecraft.mineflayer.jsonl.v1"
 
-    def __init__(
-        self,
-        execution_run_id: str | None = None,
-        *,
-        model_request_recorder: ModelRequestRecorderPort | None = None,
-        model_context: ExecutionContext | None = None,
-        model_identity: ImmutableModelIdentity | None = None,
-    ) -> None:
+    def __init__(self, execution_run_id: str | None = None) -> None:
         self.execution_run_id = (
             execution_run_id
             or os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -281,9 +277,6 @@ class RealMinecraftEnvironment:
         )
         if not self.execution_run_id:
             raise ValueError("SEM execution run identity is required")
-        self.model_request_recorder = model_request_recorder
-        self.model_context = model_context
-        self.model_identity = model_identity
 
     @property
     def identity(self) -> EnvironmentIdentity:
@@ -340,20 +333,37 @@ class RealMinecraftEnvironment:
             command_timeout_s=float(os.environ.get("MC_COMMAND_TIMEOUT_S", "90")),
             task_group_id=f"sem-minecraft-{run_identity}",
         )
+        model_binding = None
         try:
             environment_session = binding.open_session(
                 session_id=run_identity,
                 services=object(),
             )
-            planner = (
-                ModelActionPlanner(
-                    request_recorder=self.model_request_recorder,
-                    request_context=self.model_context,
-                    model_identity=self.model_identity,
+            planner = None
+            if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model":
+                closure_path = os.environ.get("SEM_MODEL_QUALIFIED_CLOSURE", "").strip()
+                if not closure_path:
+                    raise RuntimeError(
+                        "model planner requires SEM_MODEL_QUALIFIED_CLOSURE; "
+                        "raw SEM_MODEL_BASE_URL fallback is prohibited"
+                    )
+                request_root = os.environ.get(
+                    "SEM_MODEL_REQUEST_ROOT", "results/model-requests"
+                ).strip()
+                if not request_root:
+                    raise RuntimeError("SEM_MODEL_REQUEST_ROOT must be non-empty")
+                model_binding = bind_qualified_project_model(
+                    ModelProviderProfile("sem-qualified", ("generation",)),
+                    closure_path=closure_path,
+                    request_root=request_root,
+                    api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
+                    task_group_id=f"sem-model-{run_identity}",
                 )
-                if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model"
-                else None
-            )
+                model_client = model_binding.bind(planner_model_requirement())
+                planner = ModelActionPlanner(
+                    model_client,
+                    model_binding.model_requests,
+                )
             results: list[EnvironmentTaskResult] = []
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
@@ -394,6 +404,7 @@ class RealMinecraftEnvironment:
                         task=task,
                         memory_context=before.context_text,
                         snapshot=snapshot,
+                        context=context,
                     )
                     if not plan:
                         raise RuntimeError(
@@ -487,6 +498,8 @@ class RealMinecraftEnvironment:
                 )
             return tuple(results)
         finally:
+            if model_binding is not None:
+                model_binding.close()
             binding.close()
 
     @staticmethod

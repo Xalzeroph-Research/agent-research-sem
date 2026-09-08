@@ -59,14 +59,19 @@ task manifest digest 和 metric names。独立统计单位是 assignment，而
 真实运行必须设置：
 
     SEM_PLANNER_MODE=model
-    SEM_MODEL_BASE_URL=http://127.0.0.1:8002/v1
-    SEM_MODEL_NAME=qwen
+    SEM_MODEL_QUALIFIED_CLOSURE=<Noetrium-published-qualified-model-closure.json>
+    SEM_MODEL_REQUEST_ROOT=<durable-model-request-evidence-directory>
     MC_HOST=127.0.0.1
     MC_PORT=25565
     MC_VERSION=1.21.1
     MC_REQUIRE_WORLD_RESET=1
     MC_ASSIGNMENT_RESET_COMMAND=<fresh-world supervisor command>
     SEM_RESULTS_DIR=<raw-result-directory>
+
+模型 endpoint、deployment generation、model identity 与 transport timeout 必须来自
+Noetrium qualified closure；SEM 不接受 `SEM_MODEL_BASE_URL` / `SEM_MODEL_NAME`
+作为真实实验的模型权威，也不提供 raw HTTP fallback。动态 task、snapshot 与 memory
+只进入 compiled prompt/request body，固定 planner prompt identity 独立冻结并进入请求证据。
 
 入口：
 

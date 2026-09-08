@@ -4,13 +4,16 @@ from dataclasses import dataclass
 import json
 import os
 import re
-import urllib.request
 from typing import Any, Mapping
 
-from noetrium.contracts import canonical_digest
+from noetrium.contracts import (
+    ModelCapabilityRequirement,
+    ProjectModelClientPort,
+    ProjectModelRequest,
+    canonical_digest,
+)
 from noetrium.contracts.systems.model__request import (
     ExecutionContext,
-    ImmutableModelIdentity,
     ModelRequestRecorderPort,
 )
 
@@ -20,41 +23,70 @@ ALLOWED_ACTIONS = frozenset({
 })
 
 
+PLANNER_ROLE = "planner"
+PLANNER_PROMPT_GENERATION_ID = "sem-planner"
+PLANNER_PROMPT_ID = "minecraft-task-planner"
+PLANNER_SYSTEM_INSTRUCTION = (
+    "Return only valid JSON. You are a bounded Minecraft action planner. "
+    "Never claim task success; the environment verifies it."
+)
+PLANNER_PROMPT_CONTRACT = {
+    "role": PLANNER_ROLE,
+    "prompt_generation_id": PLANNER_PROMPT_GENERATION_ID,
+    "prompt_id": PLANNER_PROMPT_ID,
+    "system_instruction": PLANNER_SYSTEM_INSTRUCTION,
+    "output_contract": {"actions": "bounded Minecraft action objects"},
+    "allowed_actions": tuple(sorted(ALLOWED_ACTIONS)),
+}
+PLANNER_PROMPT_DIGEST = canonical_digest(PLANNER_PROMPT_CONTRACT)
+
+
+def planner_model_requirement() -> ModelCapabilityRequirement:
+    return ModelCapabilityRequirement(
+        role=PLANNER_ROLE,
+        prompt_generation_id=PLANNER_PROMPT_GENERATION_ID,
+        prompt_id=PLANNER_PROMPT_ID,
+        prompt_digest=PLANNER_PROMPT_DIGEST,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ModelPlannerConfig:
-    base_url: str
-    model: str
-    timeout_s: float = 120.0
     max_tokens: int = 1200
     temperature: float = 0.0
 
     @classmethod
     def from_env(cls) -> "ModelPlannerConfig":
-        base_url = os.environ.get("SEM_MODEL_BASE_URL", "http://127.0.0.1:8002/v1").rstrip("/")
         return cls(
-            base_url=base_url,
-            model=os.environ.get("SEM_MODEL_NAME", "qwen"),
-            timeout_s=float(os.environ.get("SEM_MODEL_TIMEOUT_S", "120")),
             max_tokens=int(os.environ.get("SEM_MODEL_MAX_TOKENS", "1200")),
             temperature=float(os.environ.get("SEM_MODEL_TEMPERATURE", "0")),
         )
 
 
 class ModelActionPlanner:
-    """Bounded JSON planner; it owns no memory and no environment semantics."""
+    """SEM-owned planner semantics over one Noetrium-qualified project model client."""
 
     def __init__(
         self,
+        client: ProjectModelClientPort,
+        request_recorder: ModelRequestRecorderPort,
         config: ModelPlannerConfig | None = None,
-        *,
-        request_recorder: ModelRequestRecorderPort | None = None,
-        request_context: ExecutionContext | None = None,
-        model_identity: ImmutableModelIdentity | None = None,
     ) -> None:
-        self.config = config or ModelPlannerConfig.from_env()
+        if not isinstance(client, ProjectModelClientPort):
+            raise TypeError("SEM model planner requires ProjectModelClientPort")
+        if not isinstance(request_recorder, ModelRequestRecorderPort):
+            raise TypeError("SEM model planner requires ModelRequestRecorderPort")
+        binding = client.binding
+        if (
+            binding.role != PLANNER_ROLE
+            or binding.prompt_generation_id != PLANNER_PROMPT_GENERATION_ID
+            or binding.prompt_id != PLANNER_PROMPT_ID
+            or binding.prompt_digest != PLANNER_PROMPT_DIGEST
+        ):
+            raise ValueError("SEM planner client prompt binding drift")
+        self.client = client
         self.request_recorder = request_recorder
-        self.request_context = request_context
-        self.model_identity = model_identity
+        self.config = config or ModelPlannerConfig.from_env()
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -65,54 +97,46 @@ class ModelActionPlanner:
         task: Mapping[str, Any],
         memory_context: str,
         snapshot: Mapping[str, Any],
+        context: ExecutionContext,
     ) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
+        if not isinstance(context, ExecutionContext):
+            raise TypeError("SEM planner request requires ExecutionContext")
         self.calls += 1
+        prompt_text = self._prompt(task, memory_context, snapshot)
         payload = {
-            "model": self.config.model,
+            "model": self.client.binding.model.logical_name,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
             "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
-                {"role": "system", "content": (
-                    "Return only valid JSON. You are a bounded Minecraft action "
-                    "planner. Never claim task success; the environment verifies it."
-                )},
-                {"role": "user", "content": self._prompt(task, memory_context, snapshot)},
+                {"role": "system", "content": PLANNER_SYSTEM_INSTRUCTION},
+                {"role": "user", "content": prompt_text},
             ],
         }
-        if (
-            self.request_recorder is not None
-            and self.request_context is not None
-            and self.model_identity is not None
-        ):
-            prompt_text = self._prompt(task, memory_context, snapshot)
-            self.request_recorder.record(
-                request_id=f"sem-model-request-{self.calls}",
-                context=self.request_context,
-                role="planner",
-                model=self.model_identity,
-                prompt_generation_id="sem-planner",
-                prompt_id="minecraft-task-planner",
-                prompt_digest=canonical_digest(prompt_text),
-                request_body=payload,
-                compiled_prompt_text=prompt_text,
-            )
-        request = urllib.request.Request(
-            self.config.base_url + "/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        envelope = self.request_recorder.record(
+            request_id=f"{context.run_id}:sem-planner:{self.calls}",
+            context=context,
+            role=PLANNER_ROLE,
+            model=self.client.binding.model,
+            prompt_generation_id=PLANNER_PROMPT_GENERATION_ID,
+            prompt_id=PLANNER_PROMPT_ID,
+            prompt_digest=PLANNER_PROMPT_DIGEST,
+            request_body=payload,
+            compiled_prompt_text=prompt_text,
         )
-        with urllib.request.urlopen(request, timeout=self.config.timeout_s) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        usage = result.get("usage", {})
-        self.prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
-        self.completion_tokens += int(usage.get("completion_tokens", 0) or 0)
-        content = result["choices"][0]["message"]["content"]
+        response = self.client.complete(
+            ProjectModelRequest(
+                self.client.binding.requirement_digest,
+                envelope,
+                payload,
+            )
+        )
+        self.prompt_tokens += int(response.input_tokens or 0)
+        self.completion_tokens += int(response.output_tokens or 0)
         try:
-            return self._parse_actions(content, int(task.get("max_steps", 12)))
+            return self._parse_actions(response.text, int(task.get("max_steps", 12)))
         except ValueError as exc:
-            excerpt = str(content).replace("\\n", " ")[-1200:]
+            excerpt = str(response.text).replace("\n", " ")[-1200:]
             raise ValueError(f"{exc}; raw_model_output={excerpt}") from exc
 
     @staticmethod
@@ -205,4 +229,13 @@ class ModelActionPlanner:
         return tuple(plan)
 
 
-__all__ = ["ALLOWED_ACTIONS", "ModelActionPlanner", "ModelPlannerConfig"]
+__all__ = [
+    "ALLOWED_ACTIONS",
+    "ModelActionPlanner",
+    "ModelPlannerConfig",
+    "PLANNER_PROMPT_DIGEST",
+    "PLANNER_PROMPT_GENERATION_ID",
+    "PLANNER_PROMPT_ID",
+    "PLANNER_ROLE",
+    "planner_model_requirement",
+]
