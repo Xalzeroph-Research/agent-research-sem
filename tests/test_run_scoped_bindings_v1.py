@@ -127,3 +127,10 @@ def test_model_planner_trims_action_budget() -> None:
     plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=2)
 
     assert len(plan) == 2
+
+def test_model_planner_parses_json_with_trailing_noise() -> None:
+    content = 'planner preface {"actions":[{"action_type":"wait","arguments":{"ms":1}}]} trailing noise'
+
+    plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=2)
+
+    assert plan[0][1]["ms"] == 1

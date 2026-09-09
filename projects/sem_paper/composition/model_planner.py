@@ -195,7 +195,13 @@ class ModelActionPlanner:
         try:
             document, _ = json.JSONDecoder().raw_decode(text[start:])
         except json.JSONDecodeError as exc:
-            raise ValueError("model planner did not return a valid JSON object") from exc
+            end = text.rfind("}")
+            if end <= start:
+                raise ValueError("model planner did not return a valid JSON object") from exc
+            try:
+                document = json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                raise ValueError("model planner did not return a valid JSON object") from exc
         rows = document.get("actions") if isinstance(document, Mapping) else None
         if not isinstance(rows, list):
             raise ValueError("model planner response must contain an actions array")
