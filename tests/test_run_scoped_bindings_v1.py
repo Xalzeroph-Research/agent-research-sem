@@ -134,3 +134,8 @@ def test_model_planner_parses_json_with_trailing_noise() -> None:
     plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=2)
 
     assert plan[0][1]["ms"] == 1
+
+def test_model_planner_request_uses_structured_output() -> None:
+    assert environment_module.ModelActionPlanner is not None
+    planner_source = environment_module.ModelActionPlanner.plan.__code__
+    assert "response_format" in planner_source.co_consts

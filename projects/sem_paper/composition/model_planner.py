@@ -48,6 +48,28 @@ PLANNER_SYSTEM_INSTRUCTION = (
     "Return only valid JSON. You are a bounded Minecraft action planner. "
     "Never claim task success; the environment verifies it."
 )
+
+PLANNER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action_type": {"type": "string", "enum": sorted(ALLOWED_ACTIONS)},
+                    "arguments": {"type": "object", "additionalProperties": True},
+                },
+                "required": ["action_type", "arguments"],
+                "additionalProperties": False,
+            },
+            "minItems": 1,
+            "maxItems": 32,
+        }
+    },
+    "required": ["actions"],
+    "additionalProperties": False,
+}
 PLANNER_PROMPT_CONTRACT = {
     "role": PLANNER_ROLE,
     "prompt_generation_id": PLANNER_PROMPT_GENERATION_ID,
@@ -137,6 +159,14 @@ class ModelActionPlanner:
                 "temperature": self.config.temperature,
                 "max_tokens": self.config.max_tokens,
                 "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sem_action_plan_v2",
+                        "strict": True,
+                        "schema": PLANNER_OUTPUT_SCHEMA,
+                    },
+                },
                 "messages": [
                     {"role": "system", "content": PLANNER_SYSTEM_INSTRUCTION},
                     {"role": "user", "content": prompt_text},
