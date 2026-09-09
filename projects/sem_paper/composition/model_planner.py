@@ -120,33 +120,45 @@ class ModelActionPlanner:
     ) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
         if not isinstance(context, ExecutionContext):
             raise TypeError("SEM planner request requires ExecutionContext")
-        self.calls += 1
-        prompt_text = self._prompt(task, memory_context, snapshot)
-        payload = {
-            "model": self.client.binding.model.logical_name,
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
-            "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [
-                {"role": "system", "content": PLANNER_SYSTEM_INSTRUCTION},
-                {"role": "user", "content": prompt_text},
-            ],
-        }
-        response = complete_project_model(
-            self.client,
-            self.request_recorder,
-            request_id=f"{context.run_id}:sem-planner:{self.calls}",
-            context=context,
-            request_body=payload,
-            compiled_prompt_text=prompt_text,
-        )
-        self.prompt_tokens += int(response.input_tokens or 0)
-        self.completion_tokens += int(response.output_tokens or 0)
-        try:
-            return self._parse_actions(response.text, int(task.get("max_steps", 12)))
-        except ValueError as exc:
-            excerpt = str(response.text).replace("\n", " ")[-1200:]
-            raise ValueError(f"{exc}; raw_model_output={excerpt}") from exc
+        last_error: str | None = None
+        response_text = ""
+        for _attempt in range(PLANNER_MAX_VALIDATION_ATTEMPTS):
+            self.calls += 1
+            prompt_text = self._prompt(
+                task, memory_context, snapshot
+            )
+            if last_error:
+                prompt_text += (
+                    f"Previous output was rejected by Noetrium: {last_error}. "
+                    "Return a corrected full action list."
+                )
+            payload = {
+                "model": self.client.binding.model.logical_name,
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [
+                    {"role": "system", "content": PLANNER_SYSTEM_INSTRUCTION},
+                    {"role": "user", "content": prompt_text},
+                ],
+            }
+            response = complete_project_model(
+                self.client,
+                self.request_recorder,
+                request_id=f"{context.run_id}:sem-planner:{self.calls}",
+                context=context,
+                request_body=payload,
+                compiled_prompt_text=prompt_text,
+            )
+            response_text = str(response.text)
+            self.prompt_tokens += int(response.input_tokens or 0)
+            self.completion_tokens += int(response.output_tokens or 0)
+            try:
+                return self._parse_actions(response_text, int(task.get("max_steps", 12)))
+            except ValueError as exc:
+                last_error = str(exc)
+        excerpt = response_text.replace("\n", " ")[-1200:]
+        raise ValueError(f"{last_error}; raw_model_output={excerpt}") from None
 
     @staticmethod
     def _prompt(task: Mapping[str, Any], memory_context: str, snapshot: Mapping[str, Any]) -> str:
