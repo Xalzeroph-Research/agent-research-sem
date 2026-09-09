@@ -73,3 +73,43 @@ def test_model_planner_binding_is_cached_for_the_run() -> None:
     planner_type.assert_called_once()
     assert binding.bind_count == 1
     assert binding.close_count == 1
+
+
+def test_action_event_payload_carries_effect_anchors() -> None:
+    result = SimpleNamespace(
+        observation=SimpleNamespace(
+            payload={
+                "events": [
+                    {
+                        "kind": "action_result",
+                        "payload": {
+                            "action_id": "action-1",
+                            "action": {"tool": "observe_entities"},
+                            "outcome": {"status": "applied", "code": "ENTITIES_OBSERVED"},
+                            "verified": True,
+                        },
+                    }
+                ]
+            }
+        ),
+        diagnostics={"verified": True},
+        accepted=True,
+        effect=SimpleNamespace(
+            effect_id="effect-1",
+            request_digest="request-digest",
+            certainty=SimpleNamespace(value="confirmed"),
+            before_artifact="before-1",
+            after_artifact="after-1",
+            provider_receipt="action-1",
+        ),
+    )
+
+    materialized = environment_module.RealMinecraftEnvironment._action_event_payload(result)
+
+    assert materialized["effect_receipt"]["effect_id"] == "effect-1"
+    assert materialized["effect_receipt"]["certainty"] == "confirmed"
+    assert materialized["anchors"] == [
+        "effect:effect-1",
+        "before:before-1",
+        "after:after-1",
+    ]

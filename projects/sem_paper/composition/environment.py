@@ -581,6 +581,26 @@ class RealMinecraftEnvironment:
             materialized = dict(payload)
             materialized.setdefault("verified", result.diagnostics.get("verified"))
             materialized.setdefault("accepted", result.accepted)
+            effect = getattr(result, "effect", None)
+            if effect is not None:
+                certainty = getattr(effect.certainty, "value", effect.certainty)
+                effect_payload = {
+                    "effect_id": effect.effect_id,
+                    "request_digest": effect.request_digest,
+                    "certainty": str(certainty),
+                    "before_artifact": effect.before_artifact,
+                    "after_artifact": effect.after_artifact,
+                    "provider_receipt": effect.provider_receipt,
+                }
+                materialized.setdefault("effect_receipt", effect_payload)
+                anchors = materialized.get("anchors")
+                if not isinstance(anchors, (list, tuple)) or not anchors:
+                    anchors = [f"effect:{effect.effect_id}"]
+                    if effect.before_artifact:
+                        anchors.append(f"before:{effect.before_artifact}")
+                    if effect.after_artifact:
+                        anchors.append(f"after:{effect.after_artifact}")
+                    materialized["anchors"] = anchors
             return materialized
         raise RuntimeError("Noetrium Minecraft action returned no action_result event")
 
