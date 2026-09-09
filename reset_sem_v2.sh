@@ -35,7 +35,8 @@ nohup bash -c "cd '$BASE' && exec java -Xms512M -Xmx2G -jar server.jar nogui" \
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 90); do
-  if ss -ltn | awk '$4 ~ /:25565$/ {found=1} END {exit found ? 0 : 1}'; then
+  if (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null; then
+    exec 3>&-
     printf 'minecraft_ready assignment=%s pid=%s\n' "$safe_id" "$(cat "$PIDFILE")"
     exit 0
   fi
