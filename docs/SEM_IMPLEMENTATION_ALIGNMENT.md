@@ -121,6 +121,18 @@ scheduling, and model planners use noetrium.platform.complete_project_model for
 request recording and response provenance. These are upstream mechanics; SEM
 retains task semantics, prompts, action vocabulary, and result interpretation.
 
+The assignment boundary is now hosted by
+`noetrium.platform.run_method_program` on the Universal Method Machine. SEM
+provides the assignment method node and its environment callback; Noetrium
+owns the bounded loop, program digest, checkpoint store, resume validation,
+run digest, and structured failure metadata. Durable method checkpoints are
+bound with `noetrium.platform.bind_method_checkpoint_store`. The checkpoint
+state contains only JSON task-result projections and the SEM method snapshot,
+so resume continues at the return node without replaying the environment.
+The migration is pinned to Noetrium commit
+`e07a15671b92e0715e5652ddd78b5b550542bb26` until a newer platform commit is
+deliberately selected.
+
 If a required capability is absent from the public Noetrium contract, the
 issue is upstream. Add or repair the Noetrium public API and regenerate the
 downstream facade before changing SEM to use a private path. If the public

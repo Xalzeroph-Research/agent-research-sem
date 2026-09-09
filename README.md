@@ -57,10 +57,19 @@ The supported project-facing bindings are:
 - noetrium.platform.bind_directory_run_artifact_store(...) seals durable
   assignment artifacts; build_project_run_checkpoint_store(...) provides
   Noetrium checkpoint persistence.
+- noetrium.platform.bind_universal_method_machine(...) hosts the method
+  control loop, and bind_method_checkpoint_store(...) provides crash-durable
+  method checkpoints.
+- noetrium.platform.run_method_program(...) and run_method_program_async(...)
+  execute the same MethodProgram ABI for sync and async downstream methods.
 
 open_sem_method_session() uses the first binding and never imports
 Noetrium's private semantic-plane implementation namespace.
 SemMethodAgentMemoryAdapter is the only cognition-to-SEM memory seam.
+
+The current SEM integration is validated against Noetrium Universal Method
+Machine commit `e07a15671b92e0715e5652ddd78b5b550542bb26`. The assignment
+runner uses the public facade only; it does not import `noetrium_platform`.
 
 ## Quick start
 

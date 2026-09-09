@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import base64
 import os
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable, Mapping
 from uuid import uuid4
 
 from noetrium.contracts import (
@@ -20,18 +20,22 @@ from noetrium.contracts import (
     canonical_digest,
 )
 from noetrium.contracts.systems.experimentation__run import RunArtifactKind
+from noetrium.contracts.systems.model__request import ExecutionContext
 from noetrium.platform import (
     bind_directory_run_artifact_store,
     bind_study_matrix_execution,
 )
 
 from projects.sem_paper.composition.environment import (
+    EnvironmentTaskResult,
     RealMinecraftEnvironment,
     ScriptedMinecraftEnvironment,
 )
 from projects.sem_paper.method.self_evolving_memory import (
     SemMethodAgentMemoryAdapter,
+    SEMMethodImplementation,
     open_sem_method_session,
+    run_sem_assignment_program,
 )
 
 
@@ -40,6 +44,24 @@ _DEFAULT_EXECUTION_RUN_ID = uuid4().hex
 
 def _execution_run_id() -> str:
     return os.environ.get("SEM_EXECUTION_RUN_ID", "").strip() or _DEFAULT_EXECUTION_RUN_ID
+
+
+def _decode_environment_task_result(value: Mapping[str, object]) -> EnvironmentTaskResult:
+    return EnvironmentTaskResult(
+        task_id=str(value["task_id"]),
+        success=bool(value["success"]),
+        utility=float(value["utility"]),
+        steps=int(value["steps"]),
+        duration_s=float(value["duration_s"]),
+        memory_queries=int(value["memory_queries"]),
+        blocked=bool(value["blocked"]),
+        evidence_digest=str(value["evidence_digest"]),
+        failure_class=str(value.get("failure_class", "")),
+        verified_actions=int(value.get("verified_actions", 0)),
+        evidence_closed=bool(value.get("evidence_closed", False)),
+        outcome_codes=tuple(str(item) for item in value.get("outcome_codes", ())),
+        family=str(value.get("family", "")),
+    )
 
 
 @dataclass
@@ -90,6 +112,21 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             seed=assignment.seed,
             initial_memory=(),
         )
+        implementation = SEMMethodImplementation(treatment, assignment.seed, ())
+        execution_run_id = _execution_run_id()
+        execution = ExecutionContext(
+            run_id=f"{execution_run_id}-{assignment.assignment_digest}",
+            trace_id=canonical_digest({"assignment": assignment.assignment_digest}),
+            span_id=canonical_digest({"assignment": assignment.assignment_digest, "span": "umm"}),
+            study_id=assignment.study_id,
+            condition_id=treatment,
+            task_id=assignment.assignment_digest,
+        )
+        checkpoint_root = (
+            Path(os.environ.get("SEM_RESULTS_DIR", "results/real"))
+            / execution_run_id
+            / "method-checkpoints"
+        )
         memory = (
             None
             if treatment == "no_memory"
@@ -110,13 +147,26 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             isolation = self.assignment_isolation_factory(identity, assignment, binding)
             isolation_receipt = isolation.prepare_assignment(identity)
         try:
-            results = self.environment.run_suite(
+            results, universal_method_run = run_sem_assignment_program(
                 session=session,
-                variant_id=assignment.variant_id,
-                seed=assignment.seed,
-                assignment=assignment,
-                assignment_isolation=isolation,
-                memory=memory,
+                implementation=implementation,
+                execution=execution,
+                checkpoint_root=checkpoint_root,
+                environment_run=lambda: self.environment.run_suite(
+                    session=session,
+                    variant_id=assignment.variant_id,
+                    seed=assignment.seed,
+                    assignment=assignment,
+                    assignment_isolation=isolation,
+                    memory=memory,
+                ),
+                decode_result=_decode_environment_task_result,
+                resume=os.environ.get("SEM_METHOD_RESUME", "0") == "1",
+                max_seconds=(
+                    float(os.environ["SEM_METHOD_MAX_SECONDS"])
+                    if os.environ.get("SEM_METHOD_MAX_SECONDS", "").strip()
+                    else None
+                ),
             )
             diagnostics = dict(session.diagnostics())
             method_snapshot = session.checkpoint()
@@ -132,6 +182,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             results,
             method_snapshot=method_snapshot,
             environment_checkpoint=environment_checkpoint,
+            universal_method_run=universal_method_run,
         )
         count = len(results)
         if count == 0:
@@ -165,6 +216,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         *,
         method_snapshot,
         environment_checkpoint: bytes | None,
+        universal_method_run: Mapping[str, object],
     ) -> None:
         execution_run_id = (
             os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -198,6 +250,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 "implementation_id": binding.variant.implementation_id,
                 "configuration_digest": binding.variant.configuration_digest,
             },
+            "universal_method_machine": dict(universal_method_run),
             "diagnostics": diagnostics,
             "checkpoints": {
                 "method": {
