@@ -120,3 +120,10 @@ def test_model_planner_repairs_bounded_entity_limit() -> None:
     plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=3)
 
     assert plan[0][1]["limit"] == 100
+
+def test_model_planner_trims_action_budget() -> None:
+    content = '{"actions":[{"action_type":"wait","arguments":{"ms":1}},{"action_type":"wait","arguments":{"ms":2}},{"action_type":"wait","arguments":{"ms":3}}]}'
+
+    plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=2)
+
+    assert len(plan) == 2

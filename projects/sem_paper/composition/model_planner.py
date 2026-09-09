@@ -199,8 +199,9 @@ class ModelActionPlanner:
         rows = document.get("actions") if isinstance(document, Mapping) else None
         if not isinstance(rows, list):
             raise ValueError("model planner response must contain an actions array")
-        if len(rows) > max(1, max_steps):
-            raise ValueError("model planner exceeded task action budget")
+        action_budget = max(1, max_steps)
+        if len(rows) > action_budget:
+            rows = rows[:action_budget]
         plan: list[tuple[str, Mapping[str, Any], float]] = []
         for row in rows:
             if not isinstance(row, Mapping):
