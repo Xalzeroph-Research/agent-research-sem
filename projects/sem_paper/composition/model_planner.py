@@ -217,9 +217,19 @@ class ModelActionPlanner:
             try:
                 canonical_arguments = validate_minecraft_action(action_type, arguments)
             except MinecraftActionContractError as exc:
-                raise ValueError(
-                    f"model planner action violates Noetrium action contract: {exc}"
-                ) from exc
+                if (
+                    action_type == "observe_entities"
+                    and isinstance(arguments.get("limit"), int)
+                    and not isinstance(arguments.get("limit"), bool)
+                    and not 1 <= arguments["limit"] <= 100
+                ):
+                    repaired = dict(arguments)
+                    repaired["limit"] = min(100, max(1, arguments["limit"]))
+                    canonical_arguments = validate_minecraft_action(action_type, repaired)
+                else:
+                    raise ValueError(
+                        f"model planner action violates Noetrium action contract: {exc}"
+                    ) from exc
             timeout_s = float(row.get("timeout_s", 90.0))
             if timeout_s <= 0 or timeout_s > 600:
                 raise ValueError("model planner action timeout is out of range")

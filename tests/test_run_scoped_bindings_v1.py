@@ -113,3 +113,10 @@ def test_action_event_payload_carries_effect_anchors() -> None:
         "before:before-1",
         "after:after-1",
     ]
+
+def test_model_planner_repairs_bounded_entity_limit() -> None:
+    content = '{"actions":[{"action_type":"observe_entities","arguments":{"max_distance":32,"limit":256}}]}'
+
+    plan = environment_module.ModelActionPlanner._parse_actions(content, max_steps=3)
+
+    assert plan[0][1]["limit"] == 100
