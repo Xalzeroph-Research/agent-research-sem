@@ -58,7 +58,12 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         with bind_study_matrix_execution(
             task_group_id=f"sem-study-{self.plan.plan_digest[:16]}",
         ) as binding:
-            return binding.execute_plan(self.plan, selected, self)
+            try:
+                return binding.execute_plan(self.plan, selected, self)
+            finally:
+                close = getattr(self.environment, "close", None)
+                if callable(close):
+                    close()
 
     def execute_bound(
         self,
@@ -313,12 +318,16 @@ def run_real_matrix(repetitions: int | None = None) -> StudyMatrixExecutionRepor
 
 def run_real_pilot():
     plan = _plan(1)
-    runner = SEMExperimentRunner(plan, RealMinecraftEnvironment())
+    environment = RealMinecraftEnvironment()
+    runner = SEMExperimentRunner(plan, environment)
     assignment = plan.assignments[0]
-    observation = runner._execute_assignment(
-        assignment, plan.binding_for(assignment.variant_id)
-    )
-    return plan, observation
+    try:
+        observation = runner._execute_assignment(
+            assignment, plan.binding_for(assignment.variant_id)
+        )
+        return plan, observation
+    finally:
+        environment.close()
 
 
 __all__ = [

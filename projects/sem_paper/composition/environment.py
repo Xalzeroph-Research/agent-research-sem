@@ -283,6 +283,10 @@ class RealMinecraftEnvironment:
         )
         if not self.execution_run_id:
             raise ValueError("SEM execution run identity is required")
+        self._binding = None
+        self._model_binding = None
+        self._planner = None
+        self._closed = False
 
     @property
     def identity(self) -> EnvironmentIdentity:
@@ -309,6 +313,57 @@ class RealMinecraftEnvironment:
             EnvironmentCapability.QUERY,
         ))
 
+    def _ensure_environment_binding(self):
+        if self._closed:
+            raise RuntimeError("real Minecraft environment is closed")
+        if self._binding is None:
+            recovery_root = os.environ.get(
+                "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
+            )
+            self._binding = bind_bundled_minecraft_environment(
+                host=os.environ.get("MC_HOST", "127.0.0.1"),
+                port=int(os.environ.get("MC_PORT", "25565")),
+                username=os.environ.get("MC_USERNAME", "ResearchBot"),
+                auth=os.environ.get("MC_AUTH", "offline"),
+                version=os.environ.get("MC_VERSION", "1.21.1"),
+                node_executable=os.environ.get("MC_NODE") or None,
+                action_recovery_root=recovery_root,
+                connect_timeout_s=float(os.environ.get("MC_CONNECT_TIMEOUT_S", "90")),
+                command_timeout_s=float(os.environ.get("MC_COMMAND_TIMEOUT_S", "90")),
+                task_group_id=f"sem-minecraft-{self.execution_run_id}",
+            )
+        return self._binding
+
+    def _ensure_model_planner(self):
+        if os.environ.get("SEM_PLANNER_MODE", "model").lower() != "model":
+            return None
+        if self._planner is not None:
+            return self._planner
+        closure_path = os.environ.get("SEM_MODEL_QUALIFIED_CLOSURE", "").strip()
+        if not closure_path:
+            raise RuntimeError(
+                "model planner requires SEM_MODEL_QUALIFIED_CLOSURE; "
+                "raw SEM_MODEL_BASE_URL fallback is prohibited"
+            )
+        request_root = os.environ.get(
+            "SEM_MODEL_REQUEST_ROOT", "results/model-requests"
+        ).strip()
+        if not request_root:
+            raise RuntimeError("SEM_MODEL_REQUEST_ROOT must be non-empty")
+        self._model_binding = bind_qualified_project_model(
+            ModelProviderProfile("sem-qualified", ("generation",)),
+            closure_path=closure_path,
+            request_root=request_root,
+            api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
+            task_group_id=f"sem-model-{self.execution_run_id}",
+        )
+        model_client = self._model_binding.bind(planner_model_requirement())
+        self._planner = ModelActionPlanner(
+            model_client,
+            self._model_binding.model_requests,
+        )
+        return self._planner
+
     def run_suite(
         self,
         *,
@@ -324,52 +379,14 @@ class RealMinecraftEnvironment:
         run_identity = (
             f"{self.execution_run_id}-{session.session_id.replace(':', '-')}"
         )
-        recovery_root = os.environ.get(
-            "MC_ACTION_RECOVERY_ROOT", "/var/lib/noetrium/action-recovery"
-        )
-        binding = bind_bundled_minecraft_environment(
-            host=os.environ.get("MC_HOST", "127.0.0.1"),
-            port=int(os.environ.get("MC_PORT", "25565")),
-            username=os.environ.get("MC_USERNAME", "ResearchBot"),
-            auth=os.environ.get("MC_AUTH", "offline"),
-            version=os.environ.get("MC_VERSION", "1.21.1"),
-            node_executable=os.environ.get("MC_NODE") or None,
-            action_recovery_root=recovery_root,
-            connect_timeout_s=float(os.environ.get("MC_CONNECT_TIMEOUT_S", "90")),
-            command_timeout_s=float(os.environ.get("MC_COMMAND_TIMEOUT_S", "90")),
-            task_group_id=f"sem-minecraft-{run_identity}",
-        )
-        model_binding = None
+        binding = self._ensure_environment_binding()
+        environment_session = None
         try:
             environment_session = binding.open_session(
                 session_id=run_identity,
                 services=object(),
             )
-            planner = None
-            if os.environ.get("SEM_PLANNER_MODE", "model").lower() == "model":
-                closure_path = os.environ.get("SEM_MODEL_QUALIFIED_CLOSURE", "").strip()
-                if not closure_path:
-                    raise RuntimeError(
-                        "model planner requires SEM_MODEL_QUALIFIED_CLOSURE; "
-                        "raw SEM_MODEL_BASE_URL fallback is prohibited"
-                    )
-                request_root = os.environ.get(
-                    "SEM_MODEL_REQUEST_ROOT", "results/model-requests"
-                ).strip()
-                if not request_root:
-                    raise RuntimeError("SEM_MODEL_REQUEST_ROOT must be non-empty")
-                model_binding = bind_qualified_project_model(
-                    ModelProviderProfile("sem-qualified", ("generation",)),
-                    closure_path=closure_path,
-                    request_root=request_root,
-                    api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
-                    task_group_id=f"sem-model-{run_identity}",
-                )
-                model_client = model_binding.bind(planner_model_requirement())
-                planner = ModelActionPlanner(
-                    model_client,
-                    model_binding.model_requests,
-                )
+            planner = self._ensure_model_planner()
             results: list[EnvironmentTaskResult] = []
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
@@ -509,9 +526,23 @@ class RealMinecraftEnvironment:
             self.last_checkpoint = None
             return tuple(results)
         finally:
-            if model_binding is not None:
-                model_binding.close()
-            binding.close()
+            if environment_session is not None:
+                environment_session.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        errors: list[BaseException] = []
+        for resource in (self._model_binding, self._binding):
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except BaseException as exc:
+                errors.append(exc)
+        self._closed = True
+        if errors:
+            raise ExceptionGroup("real Minecraft environment close failed", errors)
 
     @staticmethod
     def _execution_context(
