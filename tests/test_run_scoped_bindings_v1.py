@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from projects.sem_paper.composition import environment as environment_module
+from projects.sem_paper.composition import model_planner as planner_module
 
 
 class _FakeBinding:
@@ -135,7 +136,9 @@ def test_model_planner_parses_json_with_trailing_noise() -> None:
 
     assert plan[0][1]["ms"] == 1
 
-def test_model_planner_request_uses_structured_output() -> None:
-    assert environment_module.ModelActionPlanner is not None
-    planner_source = environment_module.ModelActionPlanner.plan.__code__
-    assert "response_format" in planner_source.co_consts
+def test_model_planner_schema_is_strict_and_bounded() -> None:
+    schema = planner_module.PLANNER_OUTPUT_SCHEMA
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["actions"]["maxItems"] == 32
+    assert schema["properties"]["actions"]["items"]["additionalProperties"] is False
