@@ -13,6 +13,7 @@ from noetrium.contracts import (
 )
 from noetrium.contracts.systems.environment__minecraft import (
     MinecraftActionContractError,
+    minecraft_action_catalog,
     validate_minecraft_action,
 )
 from noetrium.contracts.systems.model__request import (
@@ -25,6 +26,18 @@ ALLOWED_ACTIONS = frozenset({
     "collect_block", "craft_item", "smelt_item", "place_block",
     "move_away", "goto", "defend_self", "observe_entities", "wait",
 })
+
+_UPSTREAM_ACTION_CATALOG = {
+    contract.action_type: contract
+    for contract in minecraft_action_catalog()
+}
+if not ALLOWED_ACTIONS <= _UPSTREAM_ACTION_CATALOG.keys():
+    missing = sorted(ALLOWED_ACTIONS - _UPSTREAM_ACTION_CATALOG.keys())
+    raise RuntimeError(f"Noetrium Minecraft action catalog missing SEM actions: {missing}")
+PLANNER_ACTION_CONTRACTS = tuple(
+    _UPSTREAM_ACTION_CATALOG[action_type].as_payload()
+    for action_type in sorted(ALLOWED_ACTIONS)
+)
 
 
 PLANNER_ROLE = "planner"
@@ -41,6 +54,7 @@ PLANNER_PROMPT_CONTRACT = {
     "system_instruction": PLANNER_SYSTEM_INSTRUCTION,
     "output_contract": {"actions": "bounded Minecraft action objects"},
     "allowed_actions": tuple(sorted(ALLOWED_ACTIONS)),
+    "action_contracts": PLANNER_ACTION_CONTRACTS,
 }
 PLANNER_PROMPT_DIGEST = canonical_digest(PLANNER_PROMPT_CONTRACT)
 
@@ -136,19 +150,26 @@ class ModelActionPlanner:
     @staticmethod
     def _prompt(task: Mapping[str, Any], memory_context: str, snapshot: Mapping[str, Any]) -> str:
         allowed = ", ".join(sorted(ALLOWED_ACTIONS))
+        action_contracts = json.dumps(
+            PLANNER_ACTION_CONTRACTS,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
         task_view = {key: value for key, value in task.items() if key != "action_plan"}
         return (
             "Plan the next bounded action sequence for this Minecraft task. "
             "Use only the allowed action types and at most max_steps actions. "
             "Each action must use exactly the canonical envelope "
             "{\"action_type\":\"...\",\"arguments\":{...}}. "
-            "Arguments must match the public Noetrium action contract. Prefer short sequences and "
+            "Arguments must match the exact Noetrium action contracts below; do not rename fields "
+            "or invent aliases. Prefer short sequences and "
             "respect the observed inventory; historical memory is advisory and "
             "may be stale. Output exactly {\"actions\":[...]}.\n\n"
             f"Task: {json.dumps(task_view, sort_keys=True, ensure_ascii=False)}\n"
             f"Current snapshot: {json.dumps(dict(snapshot), sort_keys=True, ensure_ascii=False)}\n"
             f"Historical memory: {memory_context[:12000]}\n"
-            f"Allowed action types: {allowed}"
+            f"Allowed action types: {allowed}\n"
+            f"Exact Noetrium action contracts: {action_contracts}"
         )
 
     @staticmethod
