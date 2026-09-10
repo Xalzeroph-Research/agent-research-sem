@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 import base64
 import os
 from pathlib import Path
@@ -76,6 +77,9 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
     ] | None = None
 
     def run(self, assignments=None) -> StudyMatrixExecutionReport:
+        if not os.environ.get("SEM_EXECUTION_RUN_ID", "").strip():
+            run_id = str(getattr(self.environment, "execution_run_id", "")).strip()
+            os.environ["SEM_EXECUTION_RUN_ID"] = run_id or _DEFAULT_EXECUTION_RUN_ID
         selected = self.plan.assignments if assignments is None else tuple(assignments)
         with bind_study_matrix_execution(
             task_group_id=f"sem-study-{self.plan.plan_digest[:16]}",
@@ -95,10 +99,15 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
     ) -> tuple[StudyMetricObservation, ...]:
         if plan_digest != self.plan.plan_digest:
             raise ValueError("SEM runner received a different frozen plan")
-        return tuple(
-            self._execute_assignment(assignment, binding)
-            for assignment, binding in zip(unit.assignments, bindings, strict=True)
-        )
+        observations: list[StudyMetricObservation] = []
+        for assignment, binding in zip(unit.assignments, bindings, strict=True):
+            try:
+                observations.append(self._execute_assignment(assignment, binding))
+            except Exception as exc:
+                observations.append(
+                    self._record_failed_assignment(assignment, binding, exc)
+                )
+        return tuple(observations)
 
     def _execute_assignment(
         self,
@@ -115,6 +124,8 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             "sem" if condition in PAPER_ABLATION_IDS else condition,
         )
         ablation_policy_id = binding.ablation_policy_id or "none"
+        if hasattr(self.environment, "last_reset_receipt"):
+            self.environment.last_reset_receipt = None
         session, _method_endpoint = open_sem_method_session(
             session_id=f"{assignment.variant_id}:{assignment.repetition}",
             treatment_id=treatment,
@@ -186,6 +197,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             diagnostics = dict(session.diagnostics())
             method_snapshot = session.checkpoint()
             environment_checkpoint = getattr(self.environment, "last_checkpoint", None)
+            world_reset_receipt = getattr(self.environment, "last_reset_receipt", None)
         finally:
             if isolation is not None and isolation_receipt is not None:
                 isolation.finalize_assignment(identity, isolation_receipt)
@@ -201,6 +213,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             condition=condition,
             treatment=treatment,
             ablation_policy_id=ablation_policy_id,
+            world_reset_receipt=world_reset_receipt,
         )
         count = len(results)
         if count == 0:
@@ -235,6 +248,134 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         )
         return StudyMetricObservation(assignment, metrics)
 
+    def _record_failed_assignment(
+        self,
+        assignment,
+        binding: VariantBinding,
+        exc: Exception,
+    ) -> StudyMetricObservation:
+        from projects.sem_paper.experiments.protocol import (
+            PAPER_ABLATION_IDS,
+            PAPER_METHOD_BASE,
+        )
+        condition = binding.variant.variant_id
+        treatment = PAPER_METHOD_BASE.get(
+            condition,
+            'sem' if condition in PAPER_ABLATION_IDS else condition,
+        )
+        ablation_policy_id = binding.ablation_policy_id or 'none'
+        execution_run_id = _execution_run_id()
+        root = Path(
+            os.environ.get('SEM_RESULTS_DIR', 'results/real')
+        ) / execution_run_id
+        run_id = f'{execution_run_id}-{assignment.assignment_digest}'
+        message = str(exc)
+        api_key = os.environ.get('SEM_MODEL_API_KEY', '').strip()
+        if api_key:
+            message = message.replace(api_key, '[REDACTED]')
+        reset_receipt = dict(
+            getattr(self.environment, 'last_reset_receipt', None) or {}
+        )
+        planner = {
+            'timeout_s': (
+                float(os.environ['SEM_MODEL_TIMEOUT_S'])
+                if os.environ.get('SEM_MODEL_TIMEOUT_S', '').strip()
+                else 'closure-default'
+            ),
+            'max_tokens': int(os.environ.get('SEM_MODEL_MAX_TOKENS', '384')),
+            'temperature': float(os.environ.get('SEM_MODEL_TEMPERATURE', '0.0')),
+            'transport_retries': int(
+                os.environ.get('SEM_MODEL_TRANSPORT_RETRIES', '2')
+            ),
+            'memory_context_chars': int(
+                os.environ.get('SEM_MODEL_MEMORY_CONTEXT_CHARS', '8000')
+            ),
+        }
+        error = {
+            'type': type(exc).__name__,
+            'message': message[:4096],
+            'timestamp_ns': time.time_ns(),
+        }
+        payload = {
+            'status': 'failed',
+            'execution_run_id': execution_run_id,
+            'environment_id': str(
+                getattr(self.environment, 'environment_id', 'unknown')
+            ),
+            'world_reset_per_assignment': (
+                reset_receipt.get('status') == 'succeeded'
+            ),
+            'world_reset_receipt': reset_receipt,
+            'planner_mode': os.environ.get('SEM_PLANNER_MODE', 'model'),
+            'qualified_model_bound': bool(
+                os.environ.get('SEM_MODEL_QUALIFIED_CLOSURE', '').strip()
+            ),
+            'model_planner': planner,
+            'assignment': {
+                'assignment_id': assignment.assignment_digest,
+                'study_id': assignment.study_id,
+                'variant_id': assignment.variant_id,
+                'repetition': assignment.repetition,
+                'seed': assignment.seed,
+            },
+            'variant': {
+                'condition_id': condition,
+                'base_treatment_id': treatment,
+                'ablation_policy_id': ablation_policy_id,
+                'implementation_id': binding.variant.implementation_id,
+                'configuration_digest': binding.variant.configuration_digest,
+            },
+            'failure': error,
+            'universal_method_machine': {
+                'status': 'failed',
+                'error_type': error['type'],
+                'error_message': error['message'],
+            },
+            'diagnostics': {
+                'assignment_status': 'failed',
+                'failure_class': 'infrastructure_failure',
+                'error_type': error['type'],
+                'error_message': error['message'],
+            },
+            'checkpoints': {'method': None, 'environment': None},
+            'logs': {'episode': [], 'memory_query': [], 'evolution': []},
+            'tasks': [],
+        }
+        artifact_binding = bind_directory_run_artifact_store(
+            root,
+            run_id=run_id,
+            task_group_id=f'sem-artifacts-{run_id}',
+        )
+        try:
+            store = artifact_binding.store
+            artifact_ref = f'{assignment.assignment_digest}.json'
+            store.publish_json(
+                artifact_ref, payload, kind=RunArtifactKind.RESULT
+            )
+            receipt = store.finalize(
+                artifact_ref,
+                kind=RunArtifactKind.RESULT,
+                record_stream=False,
+            )
+            store.verify_finalized(receipt)
+        finally:
+            artifact_binding.close()
+        metric_values = {
+            name: 0.0 for name in self.plan.protocol.metric_names
+        }
+        metric_values.update({
+            'success_rate': 0.0,
+            'utility_mean': -1.0,
+            'risk_cost_utility': -1.0,
+        })
+        return StudyMetricObservation(
+            assignment,
+            tuple(
+                (name, float(metric_values[name]))
+                for name in self.plan.protocol.metric_names
+            ),
+        )
+
     def _write_raw_assignment(
         self,
         assignment,
@@ -248,6 +389,7 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         condition: str,
         treatment: str,
         ablation_policy_id: str,
+        world_reset_receipt: Mapping[str, object] | None,
     ) -> None:
         execution_run_id = (
             os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -259,17 +401,24 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             / execution_run_id
         )
         run_id = f"{execution_run_id}-{assignment.assignment_digest}"
+        reset_receipt = dict(world_reset_receipt or {})
         payload = {
+            "status": "succeeded",
             "execution_run_id": execution_run_id,
             "environment_id": str(getattr(self.environment, "environment_id", "unknown")),
-            "world_reset_per_assignment": (
-                os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
-                and bool(os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip())
-            ),
+            "world_reset_per_assignment": reset_receipt.get("status") == "succeeded",
+            "world_reset_receipt": reset_receipt,
             "planner_mode": os.environ.get("SEM_PLANNER_MODE", "model"),
             "qualified_model_bound": bool(
                 os.environ.get("SEM_MODEL_QUALIFIED_CLOSURE", "").strip()
             ),
+            "model_planner": {
+                "timeout_s": float(os.environ["SEM_MODEL_TIMEOUT_S"]) if os.environ.get("SEM_MODEL_TIMEOUT_S", "").strip() else "closure-default",
+                "max_tokens": int(os.environ.get("SEM_MODEL_MAX_TOKENS", "384")),
+                "temperature": float(os.environ.get("SEM_MODEL_TEMPERATURE", "0.0")),
+                "transport_retries": int(os.environ.get("SEM_MODEL_TRANSPORT_RETRIES", "2")),
+                "memory_context_chars": int(os.environ.get("SEM_MODEL_MEMORY_CONTEXT_CHARS", "8000")),
+            },
             "assignment": {
                 "assignment_id": assignment.assignment_digest,
                 "study_id": assignment.study_id,

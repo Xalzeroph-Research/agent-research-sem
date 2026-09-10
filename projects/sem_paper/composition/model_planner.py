@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import os
 import re
+import time
 from typing import Any, Mapping
 
 from noetrium.contracts import (
@@ -11,6 +12,7 @@ from noetrium.contracts import (
     ProjectModelClientPort,
     canonical_digest,
 )
+from noetrium.contracts.systems.model__serving__endpoint import ModelEndpointError
 from noetrium.contracts.systems.environment__minecraft import (
     MinecraftActionContractError,
     minecraft_action_catalog,
@@ -93,14 +95,32 @@ def planner_model_requirement() -> ModelCapabilityRequirement:
 
 @dataclass(frozen=True, slots=True)
 class ModelPlannerConfig:
-    max_tokens: int = 1200
+    max_tokens: int = 384
     temperature: float = 0.0
+    transport_retries: int = 2
+    retry_backoff_s: float = 2.0
+    memory_context_chars: int = 8000
+
+    def __post_init__(self) -> None:
+        if type(self.max_tokens) is not int or not 32 <= self.max_tokens <= 8192:
+            raise ValueError("SEM planner max_tokens must be an integer in [32, 8192]")
+        if not isinstance(self.temperature, (int, float)) or not 0 <= float(self.temperature) <= 2:
+            raise ValueError("SEM planner temperature must be in [0, 2]")
+        if type(self.transport_retries) is not int or not 0 <= self.transport_retries <= 5:
+            raise ValueError("SEM planner transport_retries must be an integer in [0, 5]")
+        if not isinstance(self.retry_backoff_s, (int, float)) or not 0 <= float(self.retry_backoff_s) <= 60:
+            raise ValueError("SEM planner retry_backoff_s must be in [0, 60]")
+        if type(self.memory_context_chars) is not int or not 1000 <= self.memory_context_chars <= 50000:
+            raise ValueError("SEM planner memory_context_chars must be an integer in [1000, 50000]")
 
     @classmethod
     def from_env(cls) -> "ModelPlannerConfig":
         return cls(
-            max_tokens=int(os.environ.get("SEM_MODEL_MAX_TOKENS", "1200")),
+            max_tokens=int(os.environ.get("SEM_MODEL_MAX_TOKENS", "384")),
             temperature=float(os.environ.get("SEM_MODEL_TEMPERATURE", "0")),
+            transport_retries=int(os.environ.get("SEM_MODEL_TRANSPORT_RETRIES", "2")),
+            retry_backoff_s=float(os.environ.get("SEM_MODEL_RETRY_BACKOFF_S", "2")),
+            memory_context_chars=int(os.environ.get("SEM_MODEL_MEMORY_CONTEXT_CHARS", "8000")),
         )
 
 
@@ -129,8 +149,22 @@ class ModelActionPlanner:
         self.request_recorder = request_recorder
         self.config = config or ModelPlannerConfig.from_env()
         self.calls = 0
+        self.transport_retry_count = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+
+    @staticmethod
+    def _is_retryable_transport(exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return isinstance(exc, ModelEndpointError) and any(
+            marker in message
+            for marker in (
+                "transport failed",
+                "admission timed out",
+                "transport cancelled",
+                "timeout",
+            )
+        )
 
     def plan(
         self,
@@ -145,9 +179,11 @@ class ModelActionPlanner:
         last_error: str | None = None
         response_text = ""
         for _attempt in range(PLANNER_MAX_VALIDATION_ATTEMPTS):
-            self.calls += 1
             prompt_text = self._prompt(
-                task, memory_context, snapshot
+                task,
+                memory_context,
+                snapshot,
+                memory_context_chars=self.config.memory_context_chars,
             )
             if last_error:
                 prompt_text += (
@@ -172,14 +208,30 @@ class ModelActionPlanner:
                     {"role": "user", "content": prompt_text},
                 ],
             }
-            response = complete_project_model(
-                self.client,
-                self.request_recorder,
-                request_id=f"{context.run_id}:sem-planner:{self.calls}",
-                context=context,
-                request_body=payload,
-                compiled_prompt_text=prompt_text,
-            )
+            response = None
+            for transport_attempt in range(self.config.transport_retries + 1):
+                self.calls += 1
+                try:
+                    response = complete_project_model(
+                        self.client,
+                        self.request_recorder,
+                        request_id=f"{context.run_id}:sem-planner:{self.calls}",
+                        context=context,
+                        request_body=payload,
+                        compiled_prompt_text=prompt_text,
+                    )
+                    break
+                except ModelEndpointError as exc:
+                    if (
+                        not self._is_retryable_transport(exc)
+                        or transport_attempt >= self.config.transport_retries
+                    ):
+                        raise
+                    self.transport_retry_count += 1
+                    if self.config.retry_backoff_s:
+                        time.sleep(self.config.retry_backoff_s * (transport_attempt + 1))
+            if response is None:
+                raise RuntimeError("SEM planner transport retry loop ended without a response")
             response_text = str(response.text)
             self.prompt_tokens += int(response.input_tokens or 0)
             self.completion_tokens += int(response.output_tokens or 0)
@@ -191,7 +243,13 @@ class ModelActionPlanner:
         raise ValueError(f"{last_error}; raw_model_output={excerpt}") from None
 
     @staticmethod
-    def _prompt(task: Mapping[str, Any], memory_context: str, snapshot: Mapping[str, Any]) -> str:
+    def _prompt(
+        task: Mapping[str, Any],
+        memory_context: str,
+        snapshot: Mapping[str, Any],
+        *,
+        memory_context_chars: int = 8000,
+    ) -> str:
         allowed = ", ".join(sorted(ALLOWED_ACTIONS))
         action_contracts = json.dumps(
             PLANNER_ACTION_CONTRACTS,
@@ -210,7 +268,7 @@ class ModelActionPlanner:
             "may be stale. Output exactly {\"actions\":[...]}.\n\n"
             f"Task: {json.dumps(task_view, sort_keys=True, ensure_ascii=False)}\n"
             f"Current snapshot: {json.dumps(dict(snapshot), sort_keys=True, ensure_ascii=False)}\n"
-            f"Historical memory: {memory_context[:12000]}\n"
+            f"Historical memory: {memory_context[:memory_context_chars]}\n"
             f"Allowed action types: {allowed}\n"
             f"Exact Noetrium action contracts: {action_contracts}"
         )

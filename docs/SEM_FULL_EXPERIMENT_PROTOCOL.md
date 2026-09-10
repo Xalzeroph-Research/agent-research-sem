@@ -100,3 +100,25 @@ A result is claim-ready only when all of the following hold:
 
 Any missing condition is reported as exploratory or diagnostic; it is never
 silently treated as a paper result.
+
+
+## Execution hardening (2026-09-10)
+
+The node1 runner now treats infrastructure faults as first-class experimental
+outcomes. Every assignment attempt is sealed as either succeeded or failed;
+a failed assignment records a redacted exception, reset receipt, provenance,
+and empty task list, then the remaining matrix continues. Failed assignments
+are excluded from outcome estimates and always block claim readiness.
+
+Model-serving requests use a bounded prompt context and output budget. The
+planner retries only Noetrium transport/admission/timeout failures, with a
+small bounded retry count and backoff; parser and contract failures are not
+silently retried. SEM_MODEL_TIMEOUT_S may override the qualified route
+deadline and is recorded in each assignment artifact.
+
+Each real assignment records a reset receipt containing required/skipped or
+succeeded/failed status, session identity, timestamps, return code, and
+digests of the reset command output. The analysis gate requires a complete
+15-condition x 3-repetition matrix, successful reset receipts, qualified
+model provenance, non-empty task evidence, and no failed assignment. Smoke
+runs remain diagnostic and cannot satisfy the real claim gate.

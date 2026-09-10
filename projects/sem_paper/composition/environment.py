@@ -292,6 +292,7 @@ class RealMinecraftEnvironment:
         self._binding = None
         self._model_binding = None
         self._planner = None
+        self.last_reset_receipt: Mapping[str, object] | None = None
         self._closed = False
 
     @property
@@ -356,12 +357,17 @@ class RealMinecraftEnvironment:
         ).strip()
         if not request_root:
             raise RuntimeError("SEM_MODEL_REQUEST_ROOT must be non-empty")
+        raw_timeout = os.environ.get("SEM_MODEL_TIMEOUT_S", "").strip()
+        model_timeout = float(raw_timeout) if raw_timeout else None
+        if model_timeout is not None and model_timeout <= 0:
+            raise ValueError("SEM_MODEL_TIMEOUT_S must be positive when provided")
         try:
             self._model_binding = bind_qualified_project_model(
                 ModelProviderProfile("sem-qualified", ("generation",)),
                 closure_path=closure_path,
                 request_root=request_root,
                 api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
+                timeout_s=model_timeout,
                 task_group_id=f"sem-model-{self.execution_run_id}",
             )
             model_client = self._model_binding.bind(planner_model_requirement())
@@ -394,8 +400,9 @@ class RealMinecraftEnvironment:
     ) -> tuple[EnvironmentTaskResult, ...]:
         # Admission must succeed before a confirmatory reset mutates the world.
         planner = self._ensure_model_planner()
+        self.last_reset_receipt = None
         if assignment_isolation is None:
-            self._reset_assignment_world(session.session_id)
+            self.last_reset_receipt = self._reset_assignment_world(session.session_id)
         run_identity = (
             f"{self.execution_run_id}-{session.session_id.replace(':', '-')}"
         )
@@ -623,25 +630,53 @@ class RealMinecraftEnvironment:
             return materialized
         raise RuntimeError("Noetrium Minecraft action returned no action_result event")
 
-    def _reset_assignment_world(self, session_id: str) -> None:
+    def _reset_assignment_world(self, session_id: str) -> dict[str, object]:
+        started_at_ns = time.time_ns()
         command = os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
         required = os.environ.get("MC_REQUIRE_WORLD_RESET", "0") == "1"
         if not command:
+            receipt = {
+                "status": "failed" if required else "skipped",
+                "required": required,
+                "session_id": session_id,
+                "started_at_ns": started_at_ns,
+                "finished_at_ns": time.time_ns(),
+                "reason": (
+                    "MC_ASSIGNMENT_RESET_COMMAND is missing"
+                    if required else "world reset is not required"
+                ),
+            }
+            self.last_reset_receipt = receipt
             if required:
                 raise RuntimeError(
                     "confirmatory Minecraft run requires MC_ASSIGNMENT_RESET_COMMAND"
                 )
-            return
+            return receipt
         rendered = command.format(
             session_id=session_id.replace(":", "-"),
             assignment_id=session_id.replace(":", "-"),
         )
         completed = run_local_shell_command(rendered, timeout_seconds=300)
+        stdout = str(completed.stdout or "")
+        stderr = str(completed.stderr or "")
+        receipt = {
+            "status": "succeeded" if completed.returncode == 0 else "failed",
+            "required": required,
+            "session_id": session_id,
+            "started_at_ns": started_at_ns,
+            "finished_at_ns": time.time_ns(),
+            "returncode": int(completed.returncode),
+            "command_digest": canonical_digest(rendered),
+            "stdout_digest": canonical_digest(stdout),
+            "stderr_digest": canonical_digest(stderr),
+        }
+        self.last_reset_receipt = receipt
         if completed.returncode != 0:
             raise RuntimeError(
                 "Minecraft assignment world reset failed: "
-                + (completed.stderr or completed.stdout)[-1000:]
+                + (stderr or stdout)[-1000:]
             )
+        return receipt
 
     @staticmethod
     def _validate_task(

@@ -142,3 +142,59 @@ def test_model_planner_schema_is_strict_and_bounded() -> None:
     assert schema["additionalProperties"] is False
     assert schema["properties"]["actions"]["maxItems"] == 32
     assert schema["properties"]["actions"]["items"]["additionalProperties"] is False
+
+
+def test_model_planner_retries_only_transport_failures() -> None:
+    from noetrium.contracts.systems.model__serving__endpoint import ModelEndpointError
+
+    assert planner_module.ModelActionPlanner._is_retryable_transport(
+        ModelEndpointError("model endpoint HTTP transport failed: TimeoutError")
+    )
+    assert planner_module.ModelActionPlanner._is_retryable_transport(
+        ModelEndpointError("model endpoint admission timed out")
+    )
+    assert not planner_module.ModelActionPlanner._is_retryable_transport(
+        ModelEndpointError("model endpoint response is not valid JSON")
+    )
+
+
+def test_model_planner_config_reads_bounded_transport_budget() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "SEM_MODEL_MAX_TOKENS": "256",
+            "SEM_MODEL_TRANSPORT_RETRIES": "4",
+            "SEM_MODEL_MEMORY_CONTEXT_CHARS": "4096",
+        },
+        clear=False,
+    ):
+        config = planner_module.ModelPlannerConfig.from_env()
+
+    assert config.max_tokens == 256
+    assert config.transport_retries == 4
+    assert config.memory_context_chars == 4096
+
+
+def test_assignment_reset_returns_a_verifiable_receipt() -> None:
+    environment = environment_module.RealMinecraftEnvironment("run-reset")
+    completed = SimpleNamespace(returncode=0, stdout="reset-ok", stderr="")
+    with patch.dict(
+        os.environ,
+        {
+            "MC_REQUIRE_WORLD_RESET": "1",
+            "MC_ASSIGNMENT_RESET_COMMAND": "reset {session_id}",
+        },
+        clear=False,
+    ), patch.object(
+        environment_module,
+        "run_local_shell_command",
+        return_value=completed,
+    ) as reset:
+        receipt = environment._reset_assignment_world("condition-0")
+
+    reset.assert_called_once_with("reset condition-0", timeout_seconds=300)
+    assert receipt["status"] == "succeeded"
+    assert receipt["required"] is True
+    assert receipt["session_id"] == "condition-0"
+    assert receipt["stdout_digest"]
+    assert environment.last_reset_receipt == receipt

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 
 from projects.sem_paper.api import PROJECT_MANIFEST
 from projects.sem_paper.benchmarks import (
@@ -19,7 +20,10 @@ from projects.sem_paper.composition import (
 )
 from projects.sem_paper.composition.runner import run_real_matrix, run_real_pilot
 from projects.sem_paper.experiments.analysis import (
-    render_required_figures, write_analysis,
+    analyze_run,
+    load_assignment_records,
+    render_required_figures,
+    write_analysis,
 )
 from projects.sem_paper.experiments import (
     build_benchmark,
@@ -102,12 +106,12 @@ def main(argv: list[str] | None = None) -> int:
                  "count": row.count, "mean": row.mean}
                 for row in report.aggregates
             ],
-            "claim_status": (
-                "full_paper_real_matrix"
-                if os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
-                and os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
-                else "exploratory_full_matrix"
-            ),
+            "claim_status": analyze_run(
+                load_assignment_records(
+                    Path(os.environ.get("SEM_RESULTS_DIR", "results/real"))
+                    / os.environ.get("SEM_EXECUTION_RUN_ID", "")
+                )
+            )["claim_status"],
         }
     elif args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()

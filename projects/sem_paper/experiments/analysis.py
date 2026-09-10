@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
@@ -17,6 +17,7 @@ class AssignmentRecord:
     treatment_id: str
     repetition: int
     payload: Mapping[str, Any]
+    status: str = "succeeded"
 
 
 def load_assignment_records(root: str | Path) -> tuple[AssignmentRecord, ...]:
@@ -41,6 +42,7 @@ def load_assignment_records(root: str | Path) -> tuple[AssignmentRecord, ...]:
             treatment,
             int(assignment.get("repetition", 0)),
             payload,
+            str(payload.get("status", "succeeded")),
         ))
     return tuple(records)
 
@@ -196,118 +198,79 @@ def _family_metrics(records: Iterable[AssignmentRecord]) -> dict[str, Any]:
 
 def analyze_run(records: Iterable[AssignmentRecord]) -> dict[str, Any]:
     records = tuple(records)
-    metric_values: dict[str, dict[str, list[float]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    for record in records:
-        for metric, value in _task_metrics(record.payload).items():
-            metric_values[record.treatment_id][metric].append(value)
-    treatments = {}
-    for treatment, metrics in sorted(metric_values.items()):
-        treatments[treatment] = {
-            metric: {
-                "mean": _mean(values),
-                "ci95": list(bootstrap_mean_ci(
-                    values, seed=sum(ord(char) for char in metric)
-                )),
-                "assignment_values": values,
-            }
-            for metric, values in sorted(metrics.items())
-        }
-    by_key = {
-        (record.treatment_id, record.repetition): _task_metrics(record.payload)
-        for record in records
+    good = tuple(r for r in records if r.status != "failed" and r.payload.get("tasks"))
+    failed = tuple(r for r in records if r.status == "failed")
+    mv: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in good:
+        for metric, value in _task_metrics(r.payload).items():
+            mv[r.treatment_id][metric].append(value)
+    treatments = {
+        t: {m: {"mean": _mean(v), "ci95": list(bootstrap_mean_ci(
+            v, seed=sum(map(ord, m)))), "assignment_values": v}
+            for m, v in sorted(ms.items())}
+        for t, ms in sorted(mv.items())
     }
-    fixed = {
-        record.repetition: _task_metrics(record.payload)
-        for record in records if record.treatment_id == "fixed_typed"
-    }
-    paired: dict[str, Any] = {}
-    for metric in sorted({
-        metric for value in by_key.values() for metric in value
-    }):
-        deltas = [
-            by_key[( "sem", repetition)].get(metric, 0.0)
-            - fixed[repetition].get(metric, 0.0)
-            for repetition in sorted(fixed)
-            if ("sem", repetition) in by_key
-        ]
-        if deltas:
-            paired[metric] = {
-                "sem_minus_fixed_typed": list(paired_permutation_ci(deltas)),
-                "deltas": deltas,
-            }
-    complete_matrix = (
-        records
-        and {"no_memory", "flat_episodic", "fixed_typed", "sem"}
-        <= {record.treatment_id for record in records}
-    )
-    real_gate = bool(records) and all(
-        record.payload.get("environment_id") == "minecraft.mineflayer.jsonl.v1"
-        and bool(record.payload.get("world_reset_per_assignment"))
-        and bool(record.payload.get("qualified_model_bound"))
-        and all(bool(row.get("evidence_closed")) for row in record.payload.get("tasks", ()))
-        for record in records
-    )
-    condition_metrics = {
-        treatment: {
-            metric: _mean(values)
-            for metric, values in metrics.items()
-        }
-        for treatment, metrics in metric_values.items()
-    }
-    full_sem = condition_metrics.get("full_sem", {})
-    ablation_deltas = {}
-    for condition, metrics in sorted(condition_metrics.items()):
-        if condition.startswith("no_") or condition == "create_only":
-            ablation_deltas[condition] = {
-                metric: float(value - full_sem.get(metric, 0.0))
-                for metric, value in metrics.items()
-            }
-    experiment_metric_map = {
-        "semantic_representation": "functional_coverage",
-        "structure_discovery": "architecture_churn",
-        "edit_capability": "accepted_edit_rate",
-        "historical_backfill": "historical_backfill_coverage",
-        "trustworthiness": "provenance_completeness",
-        "long_horizon_tasks": "long_horizon_success_rate",
-        "transfer": "knowledge_memory_usage_success",
-        "environment_drift": "sustained_target_effect",
-        "stability": "reversal_rate",
-        "cost": "risk_cost_utility",
-    }
-    experiment_types = {
-        experiment: {
-            "metric": metric,
-            "conditions": {
-                condition: float(metrics.get(metric, 0.0))
-                for condition, metrics in sorted(condition_metrics.items())
-            },
-        }
-        for experiment, metric in experiment_metric_map.items()
-    }
+    by_key = {(r.treatment_id, r.repetition): _task_metrics(r.payload) for r in good}
+    fixed_id = "fixed_memory" if any(r.treatment_id == "fixed_memory" for r in good) else "fixed_typed"
+    sem_id = "full_sem" if any(r.treatment_id == "full_sem" for r in good) else "sem"
+    fixed = {r.repetition: _task_metrics(r.payload) for r in good if r.treatment_id == fixed_id}
+    paired = {}
+    for metric in sorted({m for v in by_key.values() for m in v}):
+        ds = [by_key[(sem_id, rep)].get(metric, 0.0) - fixed[rep].get(metric, 0.0)
+              for rep in sorted(fixed) if (sem_id, rep) in by_key]
+        if ds:
+            paired[metric] = {f"{sem_id}_minus_{fixed_id}": list(paired_permutation_ci(ds)),
+                              "deltas": ds}
+    observed = {r.treatment_id for r in records}
+    core = {"no_memory", "flat_episodic", "fixed_typed", "sem"}
+    from projects.sem_paper.experiments.protocol import FULL_PAPER_IDS
+    full = set(FULL_PAPER_IDS)
+    expected = full if observed & full else core if core <= observed else observed
+    counts = Counter(r.treatment_id for r in records)
+    expected_count = len(expected) * 3
+    missing = {c: max(0, 3-counts.get(c, 0)) for c in sorted(expected) if counts.get(c, 0) < 3}
+    complete = bool(expected) and len(records) == expected_count and set(counts) == expected and not missing
+    def safe(r):
+        q = r.payload.get("world_reset_receipt")
+        return (r.status == "succeeded"
+                and r.payload.get("environment_id") == "minecraft.mineflayer.jsonl.v1"
+                and r.payload.get("world_reset_per_assignment") is True
+                and isinstance(q, Mapping) and q.get("status") == "succeeded"
+                and bool(r.payload.get("qualified_model_bound"))
+                and bool(r.payload.get("tasks"))
+                and all(bool(x.get("evidence_closed")) for x in r.payload["tasks"] if isinstance(x, Mapping)))
+    gate = complete and len(good) == expected_count and not failed and all(safe(r) for r in good)
+    cm = {t: {m: _mean(v) for m, v in ms.items()} for t, ms in mv.items()}
+    full_sem = cm.get("full_sem", {})
+    ablation = {c: {m: float(v-full_sem.get(m, 0.0)) for m, v in ms.items()}
+                for c, ms in sorted(cm.items()) if c.startswith("no_") or c == "create_only"}
+    emap = {
+        "semantic_representation": "functional_coverage", "structure_discovery": "architecture_churn",
+        "edit_capability": "accepted_edit_rate", "historical_backfill": "historical_backfill_coverage",
+        "trustworthiness": "provenance_completeness", "long_horizon_tasks": "long_horizon_success_rate",
+        "transfer": "knowledge_memory_usage_success", "environment_drift": "sustained_target_effect",
+        "stability": "reversal_rate", "cost": "risk_cost_utility"}
+    experiments = {e: {"metric": m, "conditions": {c: float(ms.get(m, 0.0)) for c, ms in sorted(cm.items())}}
+                   for e, m in emap.items()}
     return {
-        "assignment_count": len(records),
+        "assignment_count": len(records), "successful_assignment_count": len(good),
+        "failed_assignment_count": len(failed), "condition_counts": dict(sorted(counts.items())),
+        "expected_condition_count": len(expected), "expected_assignment_count": expected_count,
+        "missing_conditions": missing,
+        "failed_assignments": [{"assignment_id": r.assignment_id, "condition": r.treatment_id,
+            "repetition": r.repetition, "failure": r.payload.get("failure", {})} for r in failed],
         "treatments": treatments,
-        "paired_sem_minus_fixed_typed": paired,
-        "family_metrics": _family_metrics(records),
-        "ablation_deltas_vs_full_sem": ablation_deltas,
-        "experiment_types": experiment_types,
-        "claim_status": (
-            "claim_ready_candidate"
-            if complete_matrix and real_gate
-            else (
-                "complete_matrix_not_claim_ready"
-                if complete_matrix else "incomplete_matrix"
-            )
-        ),
+        "paired_sem_minus_fixed_typed": paired if sem_id == "sem" and fixed_id == "fixed_typed" else {},
+        f"paired_{sem_id}_minus_{fixed_id}": paired,
+        "family_metrics": _family_metrics(good), "ablation_deltas_vs_full_sem": ablation,
+        "experiment_types": experiments, "complete_matrix": complete, "real_gate": gate,
+        "claim_status": "claim_ready_candidate" if gate else "complete_matrix_not_claim_ready" if complete else "incomplete_matrix",
         "statistical_unit": "assignment",
-        "notes": [
-            "Confidence intervals are assignment-level bootstrap/permutation intervals.",
-            "Structural usefulness and sustained effects require held-out temporal audit fields.",
-        ],
+        "notes": ["Confidence intervals are assignment-level bootstrap/permutation intervals.",
+                  "Failed assignments are sealed and excluded from outcome estimates.",
+                  "A real claim requires every expected assignment, a successful reset receipt, qualified model provenance, and closed task evidence.",
+                  "Structural usefulness and sustained effects require held-out temporal audit fields."],
     }
-
 
 def write_analysis(
     root: str | Path,
