@@ -7,11 +7,11 @@
 ## 1. 目标与硬约束
 
 - 当前 SEM 使用 Qwen3-8B，暂不启用多模态。
-- SEM 实验固定使用 Noetrium commit 255ca63e 的独立 frozen worktree；不要切到 Noetrium main 或未来版本。
-- Noetrium 可继续开发，但固定 SEM 实验必须保持同一个 Noetrium worktree、Docker image、model qualification closure 和 protocol。
+- SEM 不再绑定已废弃的 Noetrium 255ca63e frozen worktree；每次实验必须把实际使用的 Noetrium commit、SEM commit、Docker image、model qualification closure 和 protocol 写入 run manifest。
+- 当前服务器上的 Noetrium canonical worktree 是联合开发基线；正式实验在启动前读取并记录其精确 commit，运行期间不得漂移。
 - 最高规范是 2026-09-07/08 的 docs/SEM_IMPLEMENTATION_ALIGNMENT.md；其次是 docs/NOETRIUM_SEM_INTEGRATION_MATRIX.md；SEM_PROTOCOL.md 服从前两者。旧 SEM v0.29 只作历史参考，不能作为当前依据。
 - 下游实现前必须先查 Noetrium public facade、public contract 和自动生成 interface schema。已有公开能力时不能猜接口、复制私有逻辑或 import 私有模块；若能力缺失先修 Noetrium 上游。
-- 修改、测试和 Linux commit 先在 node-2 完成；最后才用 Windows Portable Git + bundled SSH 对齐和 push。不要在中途由 Windows 覆盖 Linux。
+- 修改、测试和 Linux commit 先在 node-2 完成；本轮只做服务器本地 commit，不 push。不要在中途由 Windows 覆盖 Linux。
 - 文档不包含 API key、SSH 私钥、密码或 token。
 
 ## 2. Linux node-2 目录
@@ -20,9 +20,7 @@
 
 | 路径 | 用途 | 状态/注意 |
 |---|---|---|
-| /data/hdd3/agent-research-runtime/agent-research-platform-system | Noetrium canonical 主仓库 | main，HEAD 154c7891；有未跟踪 nohup.out，保留 |
-| /data/hdd3/agent-research-runtime/noetrium-sem-pinned-255ca63e | SEM 实验的冻结 Noetrium | detached HEAD 255ca63e；运行 SEM 必须挂载它 |
-| /data/hdd3/agent-research-runtime/noetrium-dev | 独立 Noetrium dev worktree | branch noetrium-dev，当前 255ca63e；不用于当前 SEM 矩阵 |
+| /data/hdd3/agent-research-runtime/agent-research-platform-system | Noetrium canonical 主仓库 | branch noe-universal-agent-harness-20260909；运行前用 git rev-parse HEAD 记录精确 SHA；用户文件保留 |
 | /data/hdd3/agent-research-runtime/agent-research-sem | SEM canonical 仓库 | main，HEAD 438f8534；未跟踪 .sem-sync/、n' LAST_FILES、results/ 必须保留 |
 | /data/hdd3/agent-research-runtime/noetrium | 历史/运行产物 | 不要当 SEM 源码挂载点 |
 | /data/hdd3/agent-research-runtime/sem | 历史/运行产物 | 不要替代 canonical SEM |
@@ -105,7 +103,7 @@ Noetrium 负责 generic contracts、provider composition、lifecycle、identity�
     # 上次结果：125 passed in 1.79s
 
     cd /data/hdd3/agent-research-runtime/agent-research-sem
-    PYTHONPATH=/data/hdd3/agent-research-runtime/noetrium-sem-pinned-255ca63e:/data/hdd3/agent-research-runtime/agent-research-sem python -m pytest -q
+    PYTHONPATH=/data/hdd3/agent-research-runtime/agent-research-platform-system:/data/hdd3/agent-research-runtime/agent-research-sem python -m pytest -q
     # 上次结果：33 passed in 1.59s
 
 容器 image 内没有 pytest；不要用 /opt/venv/bin/python -m pytest 作为容器测试假设。
@@ -122,7 +120,7 @@ Noetrium 负责 generic contracts、provider composition、lifecycle、identity�
 标准挂载：
 
     -v /data/hdd3/agent-research-runtime/agent-research-sem:/workspace/sem:ro
-    -v /data/hdd3/agent-research-runtime/noetrium-sem-pinned-255ca63e:/workspace/noe:ro
+    -v /data/hdd3/agent-research-runtime/agent-research-platform-system:/workspace/noe:ro
     -v /data/hdd3/agent-research-runtime/qualifications-vN:/workspace/qual-vN:ro
     -v /data/hdd3/agent-research-runtime:/data/hdd3/agent-research-runtime
 
@@ -191,13 +189,13 @@ v12：19 steps、10 verified actions、0 rejected、12 memory queries、success 
 ## 13. 继续实验的顺序
 
 1. 只读检查 Qwen PID、/v1/models、start marker、argv identity；不重启 Qwen。
-2. 以 frozen Noetrium 255ca63e + SEM 438f8534 做新的 formal qualification/live canary，得到新 closure。
+2. 以启动前记录的 Noetrium canonical SHA + SEM 当前 commit 做新的 formal qualification/live canary，得到新 closure。
 3. 在同一挂载和 PYTHONPATH=/workspace/noe:/workspace/sem 下运行 b.diagnose(planner_model_requirement())，必须无 diagnostics。
 4. 使用新结果目录跑 MC_REQUIRE_WORLD_RESET=1 的真实 smoke/pilot，确认 fresh-world reset、action recovery、effect receipt、model request、artifact/evidence closure。
 5. 通过后再跑完整矩阵：python -m projects.sem_paper.cli real --repetitions 3。
 6. 矩阵结束先运行 analyze，检查 matched repetition、effect certainty、memory evidence 和 audit evidence。
 7. 只有冻结 protocol、真实 model planner、fresh-world reset、verified effect receipts、memory evidence closure 和完整 matched matrix 都满足，才可 claim-ready。
-8. Linux 修改/测试/commit 全部完成后，最后 Windows fetch、ff-only merge、push、git ls-remote 核验。
+8. Linux 修改/测试/commit 全部完成后，本轮保持本地提交，不执行 push。
 
 ## 14. 常见运行命令
 
@@ -212,13 +210,13 @@ v12：19 steps、10 verified actions、0 rejected、12 memory queries、success 
     python -m projects.sem_paper.cli real --repetitions 3
     python -m projects.sem_paper.cli analyze
 
-正式 Docker 必须设置 SEM_PLANNER_MODE=model、SEM_REPETITIONS=3、SEM_MODEL_QUALIFIED_CLOSURE=/workspace/qual-vN/qwen3-8b-sem-pinned-vN.json、SEM_MODEL_REQUEST_ROOT=/workspace/results/model-requests、SEM_RESULTS_DIR=/workspace/results、MC_HOST=127.0.0.1、MC_PORT=25565、MC_VERSION=1.21.1、MC_REQUIRE_WORLD_RESET=1、MC_ACTION_RECOVERY_ROOT=/workspace/results/action-recovery、MC_CONNECT_TIMEOUT_S=90、MC_COMMAND_TIMEOUT_S=90，以及 MC_ASSIGNMENT_RESET_COMMAND='bash /data/hdd3/agent-research-runtime/agent-research-sem/reset_sem_v2.sh {assignment_id}'。
+正式 Docker 必须设置 SEM_PLANNER_MODE=model、SEM_REPETITIONS=3、SEM_MODEL_QUALIFIED_CLOSURE=/workspace/qual-vN/qwen3-8b-sem-pinned-vN.json、SEM_MODEL_REQUEST_ROOT=/workspace/results/model-requests、SEM_RESULTS_DIR=/workspace/results、MC_HOST=127.0.0.1、MC_PORT=25565、MC_VERSION=1.21.1、MC_REQUIRE_WORLD_RESET=1、MC_ACTION_RECOVERY_ROOT=/workspace/results/action-recovery、MC_CONNECT_TIMEOUT_S=90、MC_COMMAND_TIMEOUT_S=90，以及 MC_ASSIGNMENT_RESET_COMMAND='bash /workspace/sem/reset_sem_v2.sh {assignment_id}'。
 
 ## 15. 交接第一轮检查清单
 
     date -Is; hostname
     git -C /data/hdd3/agent-research-runtime/agent-research-platform-system status --short --branch
-    git -C /data/hdd3/agent-research-runtime/noetrium-sem-pinned-255ca63e rev-parse HEAD
+    git -C /data/hdd3/agent-research-runtime/agent-research-platform-system rev-parse HEAD
     git -C /data/hdd3/agent-research-runtime/agent-research-sem status --short --branch
     git -C /data/hdd3/agent-research-runtime/agent-research-sem rev-parse HEAD
     pgrep -af 'vllm.entrypoints.openai.api_server'

@@ -142,8 +142,10 @@ The migration is intentionally incremental:
 9. agent/environment adapter integration;
 10. treatment-level and assignment-level validation.
 
-The old SEM main branch is a read-only migration source. The canonical SEM development branch is main; the Noetrium canonical branch is
-also main. Legacy role-assignment material and obsolete branches are retired.
+The canonical SEM development branch is main. The server-side Noetrium canonical worktree
+currently uses branch noe-universal-agent-harness-20260909 for this joint change; each run
+records the exact Noetrium commit before execution. Legacy role-assignment material and
+obsolete branches are retired.
 
 ## 6. Scientific claim boundary
 
