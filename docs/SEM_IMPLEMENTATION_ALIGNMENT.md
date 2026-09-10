@@ -130,7 +130,7 @@ bound with `noetrium.platform.bind_method_checkpoint_store`. The checkpoint
 state contains only JSON task-result projections and the SEM method snapshot,
 so resume continues at the return node without replaying the environment.
 The migration records Noetrium main commit
-`fe01c61844af21bd93e5aa33965b0601913423e9` as its platform provenance.
+`519d8aeb88b691358939763797ca080f27acda68` as its platform provenance.
 
 If a required capability is absent from the public Noetrium contract, the
 issue is upstream. Add or repair the Noetrium public API and regenerate the

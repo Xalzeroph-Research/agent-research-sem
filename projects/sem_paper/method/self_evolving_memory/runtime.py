@@ -35,7 +35,7 @@ from .core import SEMMethodSession, SEM_METHOD_ID
 
 
 # Noetrium main after the Universal Research Harness merge.
-NOETRIUM_UMM_COMMIT = "fe01c61844af21bd93e5aa33965b0601913423e9"
+NOETRIUM_UMM_COMMIT = "519d8aeb88b691358939763797ca080f27acda68"
 
 
 class _MethodObservationSink:
@@ -52,6 +52,7 @@ class SEMMethodImplementation:
     treatment_id: str
     seed: str
     initial_memory: tuple[str, ...] = ()
+    ablation_policy_id: str = "none"
 
     @property
     def identity(self) -> MethodIdentity:
@@ -64,6 +65,7 @@ class SEMMethodImplementation:
                 {
                     "treatment_id": self.treatment_id,
                     "seed": self.seed,
+                "ablation_policy_id": self.ablation_policy_id,
                     "initial_memory": self.initial_memory,
                 }
             ),
@@ -75,6 +77,7 @@ class SEMMethodImplementation:
             {
                 "treatment_id": self.treatment_id,
                 "seed": self.seed,
+                    "ablation_policy_id": self.ablation_policy_id,
                 "initial_memory": self.initial_memory,
             }
         )
@@ -116,6 +119,7 @@ class SEMMethodSessionRuntime:
             treatment_id=implementation.treatment_id,
             seed=implementation.seed,
             initial_memory=implementation.initial_memory,
+            ablation_policy_id=implementation.ablation_policy_id,
         )
 
 
@@ -125,10 +129,16 @@ def open_sem_method_session(
     treatment_id: str,
     seed: str,
     initial_memory: tuple[str, ...] = (),
+    ablation_policy_id: str = "none",
 ) -> tuple[SEMMethodSession, MethodEndpointPort]:
     """Open SEM through Noe's public method endpoint/runtime boundary."""
 
-    implementation = SEMMethodImplementation(treatment_id, seed, initial_memory)
+    implementation = SEMMethodImplementation(
+        treatment_id=treatment_id,
+        seed=seed,
+        initial_memory=initial_memory,
+        ablation_policy_id=ablation_policy_id,
+    )
     runtime = SEMMethodSessionRuntime()
     endpoint = bind_method_endpoint(implementation, runtime)
     session = endpoint.open_session(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace, replace
 import hashlib
 import json
 import re
@@ -38,6 +38,18 @@ from .monitor import ArchitectureIndependentMonitor
 
 
 SEM_TREATMENTS = frozenset({"no_memory", "flat_episodic", "fixed_typed", "sem"})
+SEM_ABLATION_POLICIES = frozenset({
+    "none",
+    "no_create",
+    "create_only",
+    "no_historical_backfill",
+    "no_neutral_monitor",
+    "no_trusted_gate",
+    "no_forward_maintenance",
+    "no_context_adaptation",
+    "no_granularity_adaptation",
+    "no_residency_adaptation",
+})
 SEM_METHOD_ID = "self_evolving_memory"
 
 
@@ -274,6 +286,7 @@ class SEMMethodSession:
         seed: str,
         adaptive: bool | None = None,
         initial_memory: tuple[str, ...] = (),
+        ablation_policy_id: str = "none",
         evolver: EvolutionAuthority | None = None,
     ) -> None:
         if not session_id.strip() or not seed.strip():
@@ -282,9 +295,12 @@ class SEMMethodSession:
             raise ValueError(f"unknown SEM treatment: {treatment_id}")
         if adaptive is not None and adaptive != (treatment_id == "sem"):
             raise ValueError("adaptive flag must agree with the SEM treatment")
+        if ablation_policy_id not in SEM_ABLATION_POLICIES:
+            raise ValueError(f"unknown SEM ablation policy: {ablation_policy_id}")
         self.session_id = session_id
         self.treatment_id = treatment_id
         self.seed = seed
+        self.ablation_policy_id = ablation_policy_id
         self.adaptive = treatment_id == "sem"
         self._closed = False
         self._queries = 0
@@ -685,16 +701,18 @@ class SEMMethodSession:
             "operation": operation,
         })[:24]
         evidence_ids = tuple(event.evidence_id for event in matching)
-        opportunity = self._monitor.observe_failure(
-            signal=failure, evidence_ids=evidence_ids,
-        )
+        opportunity_evidence = evidence_ids
+        if self.ablation_policy_id != "no_neutral_monitor":
+            opportunity_evidence = self._monitor.observe_failure(
+                signal=failure, evidence_ids=evidence_ids,
+            ).evidence_ids
         return StructuralDemand(
             demand_id,
             outcome.task_id,
             outcome.family,
             failure,
             operation,
-            opportunity.evidence_ids,
+            opportunity_evidence,
             target_ids,
             canonical_digest({
                 "demand_id": demand_id,
@@ -885,6 +903,33 @@ class SEMMethodSession:
             ))
         return tuple(edits[:8])
 
+    def _filter_ablation_edits(
+        self,
+        edits: tuple[SemanticEdit, ...],
+    ) -> tuple[SemanticEdit, ...]:
+        policy = self.ablation_policy_id
+        if policy == "no_create":
+            return tuple(
+                edit for edit in edits
+                if edit.operation not in {"create", "create_edge"}
+            )
+        if policy == "create_only":
+            return tuple(
+                edit for edit in edits
+                if edit.operation in {"create", "create_edge"}
+            )
+        if policy == "no_granularity_adaptation":
+            return tuple(
+                edit for edit in edits
+                if edit.operation not in {"split", "merge", "retire_node"}
+            )
+        if policy in {"no_forward_maintenance", "no_residency_adaptation"}:
+            return tuple(
+                edit for edit in edits
+                if edit.operation not in {"update_node", "retire_node"}
+            )
+        return edits
+
     def _propose_rule_based(self, demand: StructuralDemand) -> EvolutionCandidate:
         builders = {
             "create": self._build_create,
@@ -893,6 +938,7 @@ class SEMMethodSession:
             "retire": self._build_retire,
         }
         edits = builders.get(demand.operation, self._build_create)(demand)
+        edits = self._filter_ablation_edits(edits)
         proposal_kind = {
             "create": "CREATE_NODE",
             "retire": "RETIRE_NODE",
@@ -949,35 +995,43 @@ class SEMMethodSession:
         raise ValueError(f"unsupported SEM edit operation: {edit.operation}")
 
     def _apply_candidate(self, candidate: EvolutionCandidate) -> bool:
-        gate = self._gate.evaluate(
-            base_graph_digest=candidate.base_graph_digest,
-            current_graph_digest=self._graph.snapshot().digest(),
-            edits=candidate.edits,
-            evidence_ids=candidate.backfill_ids,
-            known_evidence_ids={event.evidence_id for event in self._evidence},
-            graph_snapshot=self._graph.snapshot(),
-        )
+        if self.ablation_policy_id == "no_trusted_gate":
+            gate_accepted = True
+            gate_checks = ("trusted_gate_disabled",)
+            gate_reason = "trusted gate disabled by ablation"
+        else:
+            gate = self._gate.evaluate(
+                base_graph_digest=candidate.base_graph_digest,
+                current_graph_digest=self._graph.snapshot().digest(),
+                edits=candidate.edits,
+                evidence_ids=candidate.backfill_ids,
+                known_evidence_ids={event.evidence_id for event in self._evidence},
+                graph_snapshot=self._graph.snapshot(),
+            )
+            gate_accepted = gate.accepted
+            gate_checks = gate.checks
+            gate_reason = gate.reason
         self._ledger.append(
             "candidate_validated",
             generation=self.generation,
             proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
             candidate_id=candidate.candidate_id,
-            payload={"accepted": gate.accepted, "checks": list(gate.checks)},
+            payload={"accepted": gate_accepted, "checks": list(gate_checks)},
         )
-        if not gate.accepted:
+        if not gate_accepted:
             self._rejected_count += 1
             self._ledger.append(
                 "candidate_rejected",
                 generation=self.generation,
                 proposal_id=(candidate.proposal.proposal_id if candidate.proposal else ""),
                 candidate_id=candidate.candidate_id,
-                payload={"reason": gate.reason},
+                payload={"reason": gate_reason},
             )
             self._evolution_events.append({
                 "event": "candidate_rejected",
                 "candidate_id": candidate.candidate_id,
-                "reason": gate.reason,
-                "gate_checks": list(gate.checks),
+                "reason": gate_reason,
+                "gate_checks": list(gate_checks),
                 "online_utility_gate": False,
             })
             return False
@@ -1050,6 +1104,8 @@ class SEMMethodSession:
             demand = self._detect_demand(outcome)
             self._demands.append(demand)
             candidate = self._evolver.propose(self, demand)
+            if self.ablation_policy_id == "no_historical_backfill":
+                candidate = replace(candidate, backfill_ids=())
             self._candidates.append(candidate)
             self._candidate_count += 1
             self._ledger.append(
@@ -1138,6 +1194,7 @@ class SEMMethodSession:
         payload = {
             "session_id": self.session_id,
             "treatment_id": self.treatment_id,
+            "ablation_policy_id": self.ablation_policy_id,
             "seed": self.seed,
             "generation": self.generation,
             "queries": self._queries,
@@ -1258,7 +1315,11 @@ class SEMMethodSession:
         if hashlib.sha256(snapshot.opaque_payload).hexdigest() != snapshot.payload_sha256:
             raise ValueError("SEM snapshot checksum mismatch")
         data = json.loads(snapshot.opaque_payload.decode("utf-8"))
-        if data["treatment_id"] != self.treatment_id or data["seed"] != self.seed:
+        if (
+            data["treatment_id"] != self.treatment_id
+            or data.get("ablation_policy_id", "none") != self.ablation_policy_id
+            or data["seed"] != self.seed
+        ):
             raise ValueError("SEM snapshot treatment/seed mismatch")
         self._queries = int(data["queries"])
         self._query_logs = [
@@ -1381,6 +1442,17 @@ class SEMMethodSession:
             "evolution_ledger_count": len(self._ledger.entries),
             "evolution_ledger_digest": self._ledger.digest(),
             "proposal_blind_gate": True,
+            "ablation_effects": {
+                "historical_backfill": self.ablation_policy_id != "no_historical_backfill",
+                "trusted_gate": self.ablation_policy_id != "no_trusted_gate",
+                "neutral_monitor": self.ablation_policy_id != "no_neutral_monitor",
+                "create": self.ablation_policy_id != "no_create",
+                "topology_rewrite": self.ablation_policy_id != "create_only",
+                "granularity_adaptation": self.ablation_policy_id != "no_granularity_adaptation",
+                "forward_maintenance": self.ablation_policy_id != "no_forward_maintenance",
+                "residency_adaptation": self.ablation_policy_id != "no_residency_adaptation",
+                "context_adaptation": self.ablation_policy_id != "no_context_adaptation",
+            },
             "online_utility_gate": False,
             "evolution_authority": self._evolver.authority_id,
             "adaptive": self.adaptive,

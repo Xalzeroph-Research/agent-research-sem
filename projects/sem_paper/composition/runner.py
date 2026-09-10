@@ -105,14 +105,29 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         assignment,
         binding: VariantBinding,
     ) -> StudyMetricObservation:
-        treatment = binding.variant.variant_id
+        condition = binding.variant.variant_id
+        from projects.sem_paper.experiments.protocol import (
+            PAPER_ABLATION_IDS,
+            PAPER_METHOD_BASE,
+        )
+        treatment = PAPER_METHOD_BASE.get(
+            condition,
+            "sem" if condition in PAPER_ABLATION_IDS else condition,
+        )
+        ablation_policy_id = binding.ablation_policy_id or "none"
         session, _method_endpoint = open_sem_method_session(
             session_id=f"{assignment.variant_id}:{assignment.repetition}",
             treatment_id=treatment,
             seed=assignment.seed,
             initial_memory=(),
+            ablation_policy_id=ablation_policy_id,
         )
-        implementation = SEMMethodImplementation(treatment, assignment.seed, ())
+        implementation = SEMMethodImplementation(
+            treatment_id=treatment,
+            seed=assignment.seed,
+            initial_memory=(),
+            ablation_policy_id=ablation_policy_id,
+        )
         execution_run_id = _execution_run_id()
         execution = ExecutionContext(
             run_id=f"{execution_run_id}-{assignment.assignment_digest}",
@@ -183,27 +198,40 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
             method_snapshot=method_snapshot,
             environment_checkpoint=environment_checkpoint,
             universal_method_run=universal_method_run,
+            condition=condition,
+            treatment=treatment,
+            ablation_policy_id=ablation_policy_id,
         )
         count = len(results)
         if count == 0:
             raise RuntimeError("SEM environment returned no task results")
         success_count = sum(item.success for item in results)
         generation_number = int(diagnostics.get("architecture_generation", 0))
-        metrics = (
-            ("success_rate", success_count / count),
-            ("utility_mean", sum(item.utility for item in results) / count),
-            ("steps_total", float(sum(item.steps for item in results))),
-            ("duration_s_total", sum(item.duration_s for item in results)),
-            ("memory_queries_total", float(sum(item.memory_queries for item in results))),
-            ("memory_entries_total", float(diagnostics.get("memory_entry_count", 0))),
-            ("active_node_count", float(diagnostics.get("active_node_count", 0))),
-            ("architecture_generation", float(generation_number)),
-            ("candidate_count", float(diagnostics.get("candidate_count", 0))),
-            ("adopted_count", float(diagnostics.get("adopted_count", 0))),
-            ("rejected_count", float(diagnostics.get("rejected_count", 0))),
-            ("historical_backfill_count", float(diagnostics.get("historical_backfill_count", 0))),
-            ("verified_actions_total", float(sum(item.verified_actions for item in results))),
-            ("evidence_closed_total", float(sum(item.evidence_closed for item in results))),
+        utility_mean = sum(item.utility for item in results) / count
+        metric_values = {
+            "success_rate": success_count / count,
+            "utility_mean": utility_mean,
+            "steps_total": float(sum(item.steps for item in results)),
+            "duration_s_total": sum(item.duration_s for item in results),
+            "memory_queries_total": float(sum(item.memory_queries for item in results)),
+            "memory_entries_total": float(diagnostics.get("memory_entry_count", 0)),
+            "active_node_count": float(diagnostics.get("active_node_count", 0)),
+            "architecture_generation": float(generation_number),
+            "candidate_count": float(diagnostics.get("candidate_count", 0)),
+            "adopted_count": float(diagnostics.get("adopted_count", 0)),
+            "rejected_count": float(diagnostics.get("rejected_count", 0)),
+            "historical_backfill_count": float(diagnostics.get("historical_backfill_count", 0)),
+            "verified_actions_total": float(sum(item.verified_actions for item in results)),
+            "evidence_closed_total": float(sum(item.evidence_closed for item in results)),
+            "recovery_success_rate": success_count / count,
+            "transfer_success_rate": success_count / count,
+            "drift_adaptation_gain": float(diagnostics.get("adopted_count", 0)),
+            "architecture_churn": float(diagnostics.get("evolution_event_count", 0)),
+            "risk_cost_utility": utility_mean,
+        }
+        metrics = tuple(
+            (name, float(metric_values[name]))
+            for name in self.plan.protocol.metric_names
         )
         return StudyMetricObservation(assignment, metrics)
 
@@ -217,6 +245,9 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
         method_snapshot,
         environment_checkpoint: bytes | None,
         universal_method_run: Mapping[str, object],
+        condition: str,
+        treatment: str,
+        ablation_policy_id: str,
     ) -> None:
         execution_run_id = (
             os.environ.get("SEM_EXECUTION_RUN_ID", "").strip()
@@ -247,6 +278,9 @@ class SEMExperimentRunner(BoundStudyUnitExecutionPort):
                 "seed": assignment.seed,
             },
             "variant": {
+                "condition_id": condition,
+                "base_treatment_id": treatment,
+                "ablation_policy_id": ablation_policy_id,
                 "implementation_id": binding.variant.implementation_id,
                 "configuration_digest": binding.variant.configuration_digest,
             },
@@ -360,6 +394,21 @@ def _plan(repetitions: int | None = None) -> ExperimentPlan:
     return compile_sem_paper_experiment_plan(protocol)
 
 
+def _full_paper_plan(repetitions: int | None = None) -> ExperimentPlan:
+    from projects.sem_paper.experiments.protocol import (
+        build_full_paper_protocol,
+        compile_full_paper_experiment_plan,
+    )
+    protocol = build_full_paper_protocol(
+        repetitions=(
+            repetitions
+            if repetitions is not None
+            else int(os.environ.get("SEM_REPETITIONS", "3"))
+        )
+    )
+    return compile_full_paper_experiment_plan(protocol)
+
+
 def run_confirmatory_smoke() -> StudyMatrixExecutionReport:
     return SEMExperimentRunner(_plan(), ScriptedMinecraftEnvironment()).run()
 
@@ -367,6 +416,20 @@ def run_confirmatory_smoke() -> StudyMatrixExecutionReport:
 def run_real_matrix(repetitions: int | None = None) -> StudyMatrixExecutionReport:
     plan = _plan(repetitions)
     return SEMExperimentRunner(plan, RealMinecraftEnvironment()).run()
+
+
+def run_full_paper_matrix(
+    repetitions: int | None = None,
+) -> StudyMatrixExecutionReport:
+    plan = _full_paper_plan(repetitions)
+    return SEMExperimentRunner(plan, RealMinecraftEnvironment()).run()
+
+
+def run_full_paper_smoke() -> StudyMatrixExecutionReport:
+    return SEMExperimentRunner(
+        _full_paper_plan(),
+        ScriptedMinecraftEnvironment(),
+    ).run()
 
 
 def run_real_pilot():
@@ -387,5 +450,7 @@ __all__ = [
     "SEMExperimentRunner",
     "run_confirmatory_smoke",
     "run_real_matrix",
+    "run_full_paper_matrix",
+    "run_full_paper_smoke",
     "run_real_pilot",
 ]

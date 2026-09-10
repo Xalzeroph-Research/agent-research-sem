@@ -17,6 +17,46 @@ from noetrium.contracts import (
 )
 
 TREATMENT_IDS = ("no_memory", "flat_episodic", "fixed_typed", "sem")
+PAPER_COMPARISON_IDS = (
+    "fixed_memory",
+    "rule_based_evolution",
+    "full_sem",
+    "flat_memory",
+    "skill_library",
+    "planning_reference",
+)
+PAPER_ABLATION_IDS = (
+    "no_create",
+    "create_only",
+    "no_historical_backfill",
+    "no_neutral_monitor",
+    "no_trusted_gate",
+    "no_forward_maintenance",
+    "no_context_adaptation",
+    "no_granularity_adaptation",
+    "no_residency_adaptation",
+)
+PAPER_EXPERIMENT_TYPES = (
+    "semantic_representation",
+    "structure_discovery",
+    "edit_capability",
+    "historical_backfill",
+    "trustworthiness",
+    "long_horizon_tasks",
+    "transfer",
+    "environment_drift",
+    "stability",
+    "cost",
+)
+FULL_PAPER_IDS = PAPER_COMPARISON_IDS + PAPER_ABLATION_IDS
+PAPER_METHOD_BASE = {
+    "fixed_memory": "fixed_typed",
+    "rule_based_evolution": "sem",
+    "full_sem": "sem",
+    "flat_memory": "flat_episodic",
+    "skill_library": "flat_episodic",
+    "planning_reference": "no_memory",
+}
 PRIMARY_METRICS = (
     "success_rate",
     "utility_mean",
@@ -140,10 +180,104 @@ __all__ = [
     "MANIFEST_PATH",
     "PRIMARY_METRICS",
     "TREATMENT_IDS",
+    "PAPER_COMPARISON_IDS",
+    "PAPER_ABLATION_IDS",
+    "PAPER_EXPERIMENT_TYPES",
+    "FULL_PAPER_IDS",
+    "PAPER_METHOD_BASE",
     "build_benchmark",
     "load_task_manifest",
     "task_manifest_digest",
     "build_sem_paper_confirmatory_protocol",
     "compile_sem_paper_experiment_plan",
+    "build_full_paper_protocol",
+    "compile_full_paper_experiment_plan",
     "is_confirmatory_protocol",
 ]
+
+
+def build_full_paper_protocol(
+    *,
+    repetitions: int = 3,
+) -> StudyProtocol:
+    """Compile every September 7 comparison method and mechanism ablation."""
+    if repetitions < 1:
+        raise ValueError("repetitions must be positive")
+    variants = tuple(
+        StudyVariantSpec(
+            variant_id=condition,
+            kind=(
+                VariantKind.TREATMENT
+                if condition == "full_sem"
+                else VariantKind.CONTROL
+            ),
+            implementation_id=f"sem-paper.{condition}",
+            configuration_digest=canonical_digest(
+                {
+                    "condition": condition,
+                    "base_treatment": PAPER_METHOD_BASE.get(
+                        condition, "sem"
+                    ),
+                    "ablation_policy": (
+                        condition if condition in PAPER_ABLATION_IDS else "none"
+                    ),
+                    "experiment_types": PAPER_EXPERIMENT_TYPES,
+                }
+            ),
+            budget_tier="paper",
+        )
+        for condition in FULL_PAPER_IDS
+    )
+    return StudyProtocol(
+        study_id="sem-minecraft-full-paper-v1",
+        workload_id="minecraft-memory-evolution-v2",
+        variants=variants,
+        repetitions=repetitions,
+        seed_schedule_digest=canonical_digest(
+            {
+                "scheme": "deterministic-hash-derived",
+                "namespace": "sem-minecraft-full-paper-v1",
+                "repetitions": repetitions,
+            }
+        ),
+        metric_names=PRIMARY_METRICS + (
+            "recovery_success_rate",
+            "transfer_success_rate",
+            "drift_adaptation_gain",
+            "architecture_churn",
+            "risk_cost_utility",
+        ),
+        task_manifest_digest=task_manifest_digest(),
+        budget_tiers=("paper",),
+    )
+
+
+def compile_full_paper_experiment_plan(
+    protocol: StudyProtocol | None = None,
+) -> ExperimentPlan:
+    protocol = protocol or build_full_paper_protocol()
+    assignments = DeterministicStudyAssignment().assignments(protocol)
+    bindings = tuple(
+        VariantBinding(
+            variant=variant,
+            intervention_digest=canonical_digest(
+                {
+                    "variant_id": variant.variant_id,
+                    "protocol": protocol.protocol_digest,
+                }
+            ),
+            provider_id=variant.implementation_id,
+            ablation_policy_id=(
+                variant.variant_id
+                if variant.variant_id in PAPER_ABLATION_IDS
+                else "none"
+            ),
+            comparator_role=(
+                "ablation"
+                if variant.variant_id in PAPER_ABLATION_IDS
+                else "primary"
+            ),
+        )
+        for variant in protocol.variants
+    )
+    return ExperimentPlan.compile(protocol, bindings, assignments)

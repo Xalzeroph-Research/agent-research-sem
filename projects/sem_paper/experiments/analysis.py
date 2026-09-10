@@ -249,11 +249,50 @@ def analyze_run(records: Iterable[AssignmentRecord]) -> dict[str, Any]:
         and all(bool(row.get("evidence_closed")) for row in record.payload.get("tasks", ()))
         for record in records
     )
+    condition_metrics = {
+        treatment: {
+            metric: _mean(values)
+            for metric, values in metrics.items()
+        }
+        for treatment, metrics in metric_values.items()
+    }
+    full_sem = condition_metrics.get("full_sem", {})
+    ablation_deltas = {}
+    for condition, metrics in sorted(condition_metrics.items()):
+        if condition.startswith("no_") or condition == "create_only":
+            ablation_deltas[condition] = {
+                metric: float(value - full_sem.get(metric, 0.0))
+                for metric, value in metrics.items()
+            }
+    experiment_metric_map = {
+        "semantic_representation": "functional_coverage",
+        "structure_discovery": "architecture_churn",
+        "edit_capability": "accepted_edit_rate",
+        "historical_backfill": "historical_backfill_coverage",
+        "trustworthiness": "provenance_completeness",
+        "long_horizon_tasks": "long_horizon_success_rate",
+        "transfer": "knowledge_memory_usage_success",
+        "environment_drift": "sustained_target_effect",
+        "stability": "reversal_rate",
+        "cost": "risk_cost_utility",
+    }
+    experiment_types = {
+        experiment: {
+            "metric": metric,
+            "conditions": {
+                condition: float(metrics.get(metric, 0.0))
+                for condition, metrics in sorted(condition_metrics.items())
+            },
+        }
+        for experiment, metric in experiment_metric_map.items()
+    }
     return {
         "assignment_count": len(records),
         "treatments": treatments,
         "paired_sem_minus_fixed_typed": paired,
         "family_metrics": _family_metrics(records),
+        "ablation_deltas_vs_full_sem": ablation_deltas,
+        "experiment_types": experiment_types,
         "claim_status": (
             "claim_ready_candidate"
             if complete_matrix and real_gate

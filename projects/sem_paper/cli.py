@@ -12,7 +12,11 @@ from projects.sem_paper.benchmarks import (
     external_benchmark_catalog,
     prepare_external_benchmark,
 )
-from projects.sem_paper.composition import run_confirmatory_smoke
+from projects.sem_paper.composition import (
+    run_confirmatory_smoke,
+    run_full_paper_matrix,
+    run_full_paper_smoke,
+)
 from projects.sem_paper.composition.runner import run_real_matrix, run_real_pilot
 from projects.sem_paper.experiments.analysis import (
     render_required_figures, write_analysis,
@@ -20,14 +24,26 @@ from projects.sem_paper.experiments.analysis import (
 from projects.sem_paper.experiments import (
     build_benchmark,
     build_sem_paper_confirmatory_protocol,
+    build_full_paper_protocol,
     compile_sem_paper_experiment_plan,
+    compile_full_paper_experiment_plan,
     is_confirmatory_protocol,
+    PAPER_COMPARISON_IDS,
+    PAPER_ABLATION_IDS,
+    PAPER_EXPERIMENT_TYPES,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sem")
-    parser.add_argument("command", choices=("doctor", "protocol", "smoke", "evobench", "benchmark-catalog", "external-prepare", "real-pilot", "real", "analyze"))
+    parser.add_argument(
+        "command",
+        choices=(
+            "doctor", "protocol", "smoke", "evobench", "benchmark-catalog",
+            "experiment-catalog", "full-paper-smoke", "full-paper",
+            "external-prepare", "real-pilot", "real", "analyze",
+        ),
+    )
     parser.add_argument("--track", action="append", dest="tracks")
     parser.add_argument("--streams-per-track", type=int, default=2)
     parser.add_argument("--benchmark-id")
@@ -50,7 +66,50 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["SEM_MODEL_QUALIFIED_CLOSURE"] = args.model_qualified_closure
     if args.model_request_root:
         os.environ["SEM_MODEL_REQUEST_ROOT"] = args.model_request_root
-    if args.command == "doctor":
+    if args.command == "experiment-catalog":
+        protocol = build_full_paper_protocol(
+            repetitions=args.repetitions or int(os.environ.get("SEM_REPETITIONS", "3"))
+        )
+        plan = compile_full_paper_experiment_plan(protocol)
+        payload = {
+            "comparisons": list(PAPER_COMPARISON_IDS),
+            "ablations": list(PAPER_ABLATION_IDS),
+            "experiment_types": list(PAPER_EXPERIMENT_TYPES),
+            "conditions": len(protocol.variants),
+            "tasks": len(build_benchmark().tasks),
+            "repetitions": protocol.repetitions,
+            "assignments": len(plan.assignments),
+            "task_episodes": len(plan.assignments) * len(build_benchmark().tasks),
+            "claim_status": "catalog_only",
+        }
+    elif args.command == "full-paper-smoke":
+        report = run_full_paper_smoke()
+        payload = {
+            "protocol_digest": report.protocol_digest,
+            "plan_digest": report.plan_digest,
+            "observations": len(report.observations),
+            "claim_status": "diagnostic_smoke_only",
+        }
+    elif args.command == "full-paper":
+        report = run_full_paper_matrix(args.repetitions)
+        payload = {
+            "environment": "minecraft.mineflayer.jsonl.v1",
+            "protocol_digest": report.protocol_digest,
+            "plan_digest": report.plan_digest,
+            "observations": len(report.observations),
+            "aggregates": [
+                {"variant_id": row.variant_id, "metric": row.metric_name,
+                 "count": row.count, "mean": row.mean}
+                for row in report.aggregates
+            ],
+            "claim_status": (
+                "full_paper_real_matrix"
+                if os.environ.get("MC_REQUIRE_WORLD_RESET") == "1"
+                and os.environ.get("MC_ASSIGNMENT_RESET_COMMAND", "").strip()
+                else "exploratory_full_matrix"
+            ),
+        }
+    elif args.command == "doctor":
         protocol = build_sem_paper_confirmatory_protocol()
         plan = compile_sem_paper_experiment_plan(protocol)
         payload = {

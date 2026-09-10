@@ -35,7 +35,7 @@ from noetrium.platform import (
     run_local_shell_command,
 )
 
-from projects.sem_paper.experiments.protocol import load_task_manifest
+from projects.sem_paper.experiments.protocol import PAPER_METHOD_BASE, load_task_manifest
 from projects.sem_paper.method.self_evolving_memory import SEMMethodSession
 from projects.sem_paper.composition.model_planner import (
     ModelActionPlanner,
@@ -239,7 +239,13 @@ class ScriptedMinecraftEnvironment:
         )
         digest = hashlib.sha256(f"{seed}:{variant_id}:{task_id}".encode()).hexdigest()
         score = int(digest[:8], 16) % 100
-        boost = {"no_memory": 0, "flat_episodic": 6, "fixed_typed": 10, "sem": 14}.get(variant_id, 0)
+        base_variant = PAPER_METHOD_BASE.get(variant_id, variant_id)
+        boost = {
+            "no_memory": 0,
+            "flat_episodic": 6,
+            "fixed_typed": 10,
+            "sem": 14,
+        }.get(base_variant, 0)
         success = score < 58 + boost
         blocked = not success and score % 2 == 0
         steps = 8 + (int(digest[8:12], 16) % 20)
