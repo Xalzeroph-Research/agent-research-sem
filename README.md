@@ -67,8 +67,9 @@ open_sem_method_session() uses the first binding and never imports
 Noetrium's private semantic-plane implementation namespace.
 SemMethodAgentMemoryAdapter is the only cognition-to-SEM memory seam.
 
-The current SEM integration is validated against Noetrium Universal Method
-Machine commit `e07a15671b92e0715e5652ddd78b5b550542bb26`. The assignment
+The current SEM integration is validated against Noetrium main commit,
+which contains the Universal Research Harness. Recorded commit:
+`fe01c61844af21bd93e5aa33965b0601913423e9`. The assignment
 runner uses the public facade only; it does not import `noetrium_platform`.
 
 ## Quick start

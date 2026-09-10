@@ -34,7 +34,8 @@ from noetrium.platform import (
 from .core import SEMMethodSession, SEM_METHOD_ID
 
 
-NOETRIUM_UMM_COMMIT = "e07a15671b92e0715e5652ddd78b5b550542bb26"
+# Noetrium main after the Universal Research Harness merge.
+NOETRIUM_UMM_COMMIT = "fe01c61844af21bd93e5aa33965b0601913423e9"
 
 
 class _MethodObservationSink:

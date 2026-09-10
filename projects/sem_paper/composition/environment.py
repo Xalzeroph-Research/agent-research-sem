@@ -350,14 +350,26 @@ class RealMinecraftEnvironment:
         ).strip()
         if not request_root:
             raise RuntimeError("SEM_MODEL_REQUEST_ROOT must be non-empty")
-        self._model_binding = bind_qualified_project_model(
-            ModelProviderProfile("sem-qualified", ("generation",)),
-            closure_path=closure_path,
-            request_root=request_root,
-            api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
-            task_group_id=f"sem-model-{self.execution_run_id}",
-        )
-        model_client = self._model_binding.bind(planner_model_requirement())
+        try:
+            self._model_binding = bind_qualified_project_model(
+                ModelProviderProfile("sem-qualified", ("generation",)),
+                closure_path=closure_path,
+                request_root=request_root,
+                api_key=os.environ.get("SEM_MODEL_API_KEY", ""),
+                task_group_id=f"sem-model-{self.execution_run_id}",
+            )
+            model_client = self._model_binding.bind(planner_model_requirement())
+        except Exception as exc:
+            diagnostics = getattr(exc, "diagnostics", ())
+            detail = "; ".join(
+                str(getattr(item, "message", item)) for item in diagnostics
+            )
+            if not detail:
+                raise
+            raise RuntimeError(
+                "SEM model qualification preflight failed: "
+                f"{detail} (closure={closure_path})"
+            ) from exc
         self._planner = ModelActionPlanner(
             model_client,
             self._model_binding.model_requests,
@@ -374,6 +386,8 @@ class RealMinecraftEnvironment:
         assignment_isolation: object | None = None,
         memory: AgentMemoryPort | None = None,
     ) -> tuple[EnvironmentTaskResult, ...]:
+        # Admission must succeed before a confirmatory reset mutates the world.
+        planner = self._ensure_model_planner()
         if assignment_isolation is None:
             self._reset_assignment_world(session.session_id)
         run_identity = (
@@ -386,7 +400,6 @@ class RealMinecraftEnvironment:
                 session_id=run_identity,
                 services=object(),
             )
-            planner = self._ensure_model_planner()
             results: list[EnvironmentTaskResult] = []
             for ordinal, task in enumerate(load_task_manifest()["tasks"]):
                 task_id = str(task["task_id"])
