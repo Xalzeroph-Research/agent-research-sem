@@ -313,3 +313,38 @@ def test_sem_opens_through_noe_method_endpoint_runtime_contract() -> None:
     ).identity
     assert isinstance(endpoint.runtime, SEMMethodSessionRuntime)
     session.close()
+
+def test_real_environment_model_preflight_keeps_actionable_binding_diagnostics(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import projects.sem_paper.composition.environment as environment_module
+
+    class _BindingFailure(RuntimeError):
+        diagnostics = (
+            SimpleNamespace(
+                message=(
+                    "qualified model binding unavailable: ValueError: "
+                    "qualification context_length 32768 does not match live endpoint "
+                    "max_model_len 40960"
+                )
+            ),
+        )
+
+    class _Binding:
+        model_requests = object()
+
+        def bind(self, requirement):
+            raise _BindingFailure("model binding rejected")
+
+    monkeypatch.setenv("SEM_PLANNER_MODE", "model")
+    monkeypatch.setenv("SEM_MODEL_QUALIFIED_CLOSURE", "/qual/stale.json")
+    monkeypatch.setenv("SEM_MODEL_REQUEST_ROOT", "/tmp/model-requests")
+    monkeypatch.setattr(
+        environment_module,
+        "bind_qualified_project_model",
+        lambda *args, **kwargs: _Binding(),
+    )
+
+    environment = environment_module.RealMinecraftEnvironment("preflight")
+    with pytest.raises(RuntimeError, match="max_model_len 40960"):
+        environment._ensure_model_planner()

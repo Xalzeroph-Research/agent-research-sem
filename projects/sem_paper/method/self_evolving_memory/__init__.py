@@ -25,9 +25,11 @@ from .semantics import (
     parse_transform, validate_transform,
 )
 from .runtime import (
+    NOETRIUM_UMM_COMMIT,
     SEMMethodImplementation,
     SEMMethodSessionRuntime,
     open_sem_method_session,
+    run_sem_assignment_program,
 )
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "NeutralArchitectureObservation",
     "DETERMINISTIC_TRANSFORMS", "SEMANTIC_TRANSFORMS", "TransformSpec",
     "parse_transform", "validate_transform",
-    "SEMMethodImplementation", "SEMMethodSessionRuntime",
-    "open_sem_method_session",
+    "NOETRIUM_UMM_COMMIT", "SEMMethodImplementation",
+    "SEMMethodSessionRuntime", "open_sem_method_session",
+    "run_sem_assignment_program",
 ]
