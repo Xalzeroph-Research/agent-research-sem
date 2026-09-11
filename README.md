@@ -69,7 +69,7 @@ SemMethodAgentMemoryAdapter is the only cognition-to-SEM memory seam.
 
 The current SEM integration is validated against Noetrium main commit,
 which contains the Universal Research Harness. Recorded commit:
-`c0ce636e3d696bf74051418c685e3f41f6779b10`. The assignment
+`6e1d9021`. The assignment
 runner uses the public facade only; it does not import `noetrium_platform`.
 
 ## Quick start
