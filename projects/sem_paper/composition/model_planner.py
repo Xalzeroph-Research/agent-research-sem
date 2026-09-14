@@ -328,6 +328,44 @@ class ModelActionPlanner:
         )
 
     @staticmethod
+    def _repair_bounded_arguments(
+        action_type: str, arguments: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        ranges: dict[str, dict[str, tuple[float, float]]] = {
+            "collect_block": {"count": (1, 64), "max_distance": (4, 128)},
+            "craft_item": {"count": (1, 64)},
+            "defend_self": {
+                "radius": (1, 32),
+                "max_targets": (1, 16),
+                "max_hits": (1, 40),
+            },
+            "goto": {"radius": (0.1, 64)},
+            "move_away": {"distance": (1, 64)},
+            "observe_entities": {"max_distance": (1, 128), "limit": (1, 100)},
+            "smelt_item": {
+                "count": (1, 8),
+                "max_distance": (1, 128),
+                "max_wait_s": (10, 180),
+            },
+            "wait": {"ms": (0, 10000)},
+        }
+        repaired = dict(arguments)
+        changed = False
+        for field, (lower, upper) in ranges.get(action_type, {}).items():
+            value = repaired.get(field)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                bounded = min(upper, max(lower, value))
+                if bounded != value:
+                    repaired[field] = bounded
+                    changed = True
+        if not changed:
+            return None
+        try:
+            return validate_minecraft_action(action_type, repaired)
+        except MinecraftActionContractError:
+            return None
+
+    @staticmethod
     def _parse_actions(content: str, max_steps: int) -> tuple[tuple[str, Mapping[str, Any], float], ...]:
         text = re.sub(r"<think>.*?</think>", "", str(content), flags=re.DOTALL).strip()
         text = re.sub(r"^\x60{3}(?:json)?\s*|\s*\x60{3}$", "", text, flags=re.IGNORECASE).strip()
@@ -370,19 +408,14 @@ class ModelActionPlanner:
             try:
                 canonical_arguments = validate_minecraft_action(action_type, arguments)
             except MinecraftActionContractError as exc:
-                if (
-                    action_type == "observe_entities"
-                    and isinstance(arguments.get("limit"), int)
-                    and not isinstance(arguments.get("limit"), bool)
-                    and not 1 <= arguments["limit"] <= 100
-                ):
-                    repaired = dict(arguments)
-                    repaired["limit"] = min(100, max(1, arguments["limit"]))
-                    canonical_arguments = validate_minecraft_action(action_type, repaired)
-                else:
+                repaired = ModelActionPlanner._repair_bounded_arguments(
+                    action_type, arguments
+                )
+                if repaired is None:
                     raise ValueError(
                         f"model planner action violates Noetrium action contract: {exc}"
                     ) from exc
+                canonical_arguments = repaired
             timeout_s = float(row.get("timeout_s", 90.0))
             if timeout_s <= 0 or timeout_s > 600:
                 raise ValueError("model planner action timeout is out of range")
