@@ -152,6 +152,7 @@ class ModelActionPlanner:
         self.transport_retry_count = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.effective_memory_context_chars = self.config.memory_context_chars
 
     @staticmethod
     def _is_retryable_transport(exc: BaseException) -> bool:
@@ -179,17 +180,17 @@ class ModelActionPlanner:
         last_error: str | None = None
         response_text = ""
         for _attempt in range(PLANNER_MAX_VALIDATION_ATTEMPTS):
-            prompt_text = self._prompt(
+            prompt_text = self._prompt_with_context_budget(
                 task,
                 memory_context,
                 snapshot,
-                memory_context_chars=self.config.memory_context_chars,
             )
             if last_error:
                 prompt_text += (
                     f"Previous output was rejected by Noetrium: {last_error}. "
                     "Return a corrected full action list."
                 )
+                prompt_text = prompt_text[: self._prompt_char_budget()]
             payload = {
                 "model": self.client.binding.model.logical_name,
                 "temperature": self.config.temperature,
@@ -243,6 +244,59 @@ class ModelActionPlanner:
         raise ValueError(f"{last_error}; raw_model_output={excerpt}") from None
 
     @staticmethod
+    def _bounded_prompt_value(value: Mapping[str, Any], max_chars: int) -> Mapping[str, Any]:
+        encoded = json.dumps(dict(value), sort_keys=True, ensure_ascii=False)
+        if len(encoded) <= max_chars:
+            return dict(value)
+        return {"truncated_for_model_context": encoded[:max(64, max_chars)]}
+
+    def _prompt_char_budget(self) -> int:
+        context_window_tokens = int(
+            os.environ.get("SEM_MODEL_CONTEXT_WINDOW_TOKENS", "8192")
+        )
+        reserved_tokens = self.config.max_tokens + 128
+        if context_window_tokens <= reserved_tokens:
+            raise ValueError("SEM model context window is smaller than planner completion reserve")
+        return max(2000, int((context_window_tokens - reserved_tokens) * 0.9))
+
+    def _prompt_with_context_budget(
+        self,
+        task: Mapping[str, Any],
+        memory_context: str,
+        snapshot: Mapping[str, Any],
+    ) -> str:
+        prompt_char_budget = self._prompt_char_budget()
+        bounded_task = self._bounded_prompt_value(task, min(1400, prompt_char_budget // 4))
+        bounded_snapshot = self._bounded_prompt_value(
+            snapshot, min(1800, prompt_char_budget // 3)
+        )
+        base_prompt = self._prompt(
+            bounded_task, "", bounded_snapshot, memory_context_chars=0
+        )
+        effective_chars = max(
+            1000,
+            min(
+                self.config.memory_context_chars,
+                max(1000, prompt_char_budget - len(base_prompt)),
+            ),
+        )
+        self.effective_memory_context_chars = effective_chars
+        prompt = self._prompt(
+            bounded_task,
+            memory_context,
+            bounded_snapshot,
+            memory_context_chars=effective_chars,
+        )
+        if len(prompt) > prompt_char_budget:
+            prompt = self._prompt(
+                bounded_task,
+                memory_context,
+                bounded_snapshot,
+                memory_context_chars=1000,
+            )
+        return prompt[:prompt_char_budget]
+
+    @staticmethod
     def _prompt(
         task: Mapping[str, Any],
         memory_context: str,
@@ -289,7 +343,11 @@ class ModelActionPlanner:
             try:
                 document = json.loads(text[start : end + 1])
             except json.JSONDecodeError:
-                raise ValueError("model planner did not return a valid JSON object") from exc
+                try:
+                    repaired = text[start : end + 1].rstrip().rstrip(",") + "]}"
+                    document = json.loads(repaired)
+                except json.JSONDecodeError:
+                    raise ValueError("model planner did not return a valid JSON object") from exc
         rows = document.get("actions") if isinstance(document, Mapping) else None
         if not isinstance(rows, list):
             raise ValueError("model planner response must contain an actions array")
